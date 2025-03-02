@@ -1,3 +1,4 @@
+# Author: Jan T. Offermann (UChicago)
 # Based on code written by Leo Rozanov (UChicago)
 
 import sys,glob,json
@@ -6,7 +7,17 @@ import ROOT as rt
 import argparse as ap
 import numpy as np
 
+import utils.qol_utils.progress_bar as pb
+
 class JsonWriter():
+    """
+    A simple class for writing to JSON files.
+    These are plaintext and will be quite large,
+    plus all the data is stored in memory and
+    only flushed at the end.
+    A different way of writing data -- likely
+    using ROOT -- would be much preferrable.
+    """
     def __init__(self,output_file='output.json'):
         self.output_filename = output_file
         self.data_dict = {}
@@ -18,7 +29,7 @@ class JsonWriter():
 
     def Write(self):
         with open(self.output_filename, 'w') as fp:
-            json.dump(self.data_dict, fp)
+            json.dump(self.data_dict, fp, indent=4)
 
 class Track():
     def __init__(self, lcio_track, Bfield):
@@ -599,7 +610,12 @@ def main(args):
             ##################################################################
             # Loop over the truth objects and fill histograms
             for j,mcp in enumerate(mcp_collection):
-                print('MCP: [{}/{}]'.format(j+1,len(mcp_collection)))
+                pb.printProgressBar(
+                    j,
+                    len(mcp_collection),
+                    prefix='\tMCPs',
+                    suffix='Complete'
+                )
                 FillKinematicDict(mcp,mcp_dict)
 
                 # hists["mcp_pt"].Fill(mcp_tlv.Perp())
@@ -628,7 +644,6 @@ def main(args):
                         tracks = relation.getRelatedToObjects(mcp)
                         try: # to deal with the above-mentioned issue
                             for k,track in enumerate(tracks):
-                                print('\ttrack: [{}/{}]'.format(k+1,len(tracks)))
                                 # theta = np.pi/2- np.arctan(track.getTanLambda())
                                 # phi = track.getPhi()
                                 # eta = -np.log(np.tan(theta/2))
@@ -686,6 +701,12 @@ def main(args):
                         #     d_mu_dict['pt_relpt'].append([mcp_vec.Pt(), (pfo_mu_vec.Pt() - mcp_vec.Pt())/mcp_vec.Pt()])
             ##################################################################
 
+            pb.printProgressBar(
+                len(mcp_collection),
+                len(mcp_collection),
+                prefix='\tMCPs',
+                suffix='Complete'
+            )
             if(n_mcp_mu > 1):
                 print('\tWarning: Found {} truth-level muons in event! Skipping...'.format(n_mcp_mu))
 
@@ -695,8 +716,26 @@ def main(args):
             counter = 0
             max_hits = 0
             best_track = None
+
+            track_print_chunk = int(len(track_collection) / 200)
+            progress_bar = pb.ProgressBar(
+                    prefix='\tTracks',
+                    suffix='Complete'
+            )
+
             for j,track in enumerate(track_collection):
-                print('Track: [{}/{}]'.format(j+1,len(track_collection)))
+
+                # NOTE: There are typically many tracks, so we will not print for each one.
+                #       I think this should speed things up a tiny bit. -Jan
+
+                if(j%track_print_chunk==0):
+                    # pb.printProgressBar(
+                    #     j,
+                    #     len(track_collection),
+                    #     prefix='\tTracks',
+                    #     suffix='Complete'
+                    # )
+                    progress_bar.Print(j,len(track_collection))
 
                 track_container = Track(track,Bfield)
 
@@ -716,9 +755,9 @@ def main(args):
                     fake_outer_nhit = 0
                     if(len(hit_collections) > 0):
                         fake_pixel_nhit, fake_inner_nhit, fake_outer_nhit = NHitsPerLayer(track,hit_collections[0])
-                        fake_track_dict['pixel_nhits'].append(fake_pixel_nhit)
-                        fake_track_dict['inner_nhits'].append(fake_inner_nhit)
-                        fake_track_dict['outer_nhits'].append(fake_outer_nhit)
+                        fake_track_dict['pixel_nhit'].append(fake_pixel_nhit)
+                        fake_track_dict['inner_nhit'].append(fake_inner_nhit)
+                        fake_track_dict['outer_nhit'].append(fake_outer_nhit)
                     num_fake_tracks += 1
                 else:
                     pass # TODO: Could do something with LC relations here?
@@ -773,6 +812,15 @@ def main(args):
                 pixel_nhit, inner_nhit, outer_nhit = NHitsPerLayer(track,hit_collections[0])
 
             ##################################################################
+
+            progress_bar.Print(len(track_collection),len(track_collection))
+
+            # pb.printProgressBar(
+            #     len(track_collection),
+            #     len(track_collection),
+            #     prefix='\tTracks',
+            #     suffix='Complete'
+            # )
 
             #print("End of tracks")
             # This is here to check that we never reconstruct multiple muons
