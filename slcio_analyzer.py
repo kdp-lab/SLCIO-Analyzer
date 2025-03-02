@@ -6,6 +6,20 @@ import ROOT as rt
 import argparse as ap
 import numpy as np
 
+class JsonWriter():
+    def __init__(self,output_file='output.json'):
+        self.output_filename = output_file
+        self.data_dict = {}
+
+    def Append(self,key,val):
+        if(key not in self.data_dict.keys()):
+            self.data_dict[key] = []
+        self.data_dict[key].append(val)
+
+    def Write(self):
+        with open(self.output_filename, 'w') as fp:
+            json.dump(self.data_dict, fp)
+
 class Track():
     def __init__(self, lcio_track, Bfield):
         self.vec = GetTrackFourVector(lcio_track,Bfield)
@@ -48,6 +62,21 @@ class Track():
     def GetNHits(self):
         return self.nhits
 
+def GetNumEventsTotal(fnames, max_events):
+    if(max_events > 1):
+        return max_events
+    num_events = 0
+    reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
+    reader.setReadCollectionNames([])
+
+    # ############## LOOP OVER EVENTS AND FILL HISTOGRAMS  #############################
+    # Loop over events
+    for f in fnames:
+        reader.open(f)
+        num_events += reader.getNumberOfEvents()
+        reader.close()
+    return num_events
+
 
 def check_hard_radiation(mcp, fractional_threshold):
     had_hard_rad = False
@@ -77,8 +106,8 @@ def GetFourVector(obj):
 
     obj_p = obj.getMomentum()
     vec = rt.Math.PxPyPzEVector()
-    vec.SetCoordinates(*obj_p[0:3], obj.getEnergy())
-    return obj
+    vec.SetCoordinates(obj_p[0],obj_p[1],obj_p[2], obj.getEnergy())
+    return vec
 
 def GetTrackFourVector(track, Bfield):
     theta = np.pi/2- np.arctan(track.getTanLambda())
@@ -151,7 +180,6 @@ def FillResolutionDict(muon, track, d):
 
     return
 
-
 def main(args):
     rt.gROOT.SetBatch()
 
@@ -160,12 +188,14 @@ def main(args):
     parser.add_argument('-n','--nEvents',type=int,default=-1)
     parser.add_argument('-v','--verbose',type=int,default=0)
     parser.add_argument('-o','--outputFile',type=str,default='slcio_analyser.json')
+    parser.add_argument('-m','--mode',type=str,default='JSON')
     args = vars(parser.parse_args())
 
     fnames = ParseInputFiles(args['inputFile'])
     max_events = args['nEvents'] # Set to -1 to run over all events
-    verbose = args['verbose'] > 0
+    verbose = args['verbose'] # integer
     output_json = args['outputFile']
+    mode = args['mode'].lower()
 
     # Define a bunch of constants used later
     min_dr = 0.005
@@ -232,97 +262,104 @@ def main(args):
     # Finally making one 2D histogram; this is what I'll use for a pT resolution vs. pT plot.
     h_2d_relpt = rt.TH2F("h_2d_relpt", "h_2d_relpt", *binning['pt'], 500, -0.5, 0.5)
 
-    # Create empty lists for each variable
-    mcp_pt = [] #mcp = MCParticle (truth)
-    mcp_phi = []
-    mcp_eta = []
+    # Create our writer object.
+    writer = None
+    if(mode=='json'):
+        writer = JsonWriter(output_file=output_json)
 
-    pfo_pt = [] #pfo = Particle FLow Object (reconstructed)
-    pfo_phi = []
-    pfo_eta = []
-    pfo_mu_pt = []
-    pfo_mu_phi = []
-    pfo_mu_eta = []
+    # # Create empty lists for each variable
+    # mcp_pt = [] #mcp = MCParticle (truth)
+    # mcp_phi = []
+    # mcp_eta = []
 
-    mcp_mu_pt = [] #mcp_mu = MCParticle muon
-    mcp_mu_phi = []
-    mcp_mu_eta = []
+    # # pfo_pt = [] #pfo = Particle FLow Object (reconstructed)
+    # # pfo_phi = []
+    # # pfo_eta = []
+    # # pfo_mu_pt = []
+    # # pfo_mu_phi = []
+    # # pfo_mu_eta = []
 
-    mcp_mu_match_pt = [] #mcp_mu_match = MCParticle muon that was matched to a PFO muon
-    mcp_mu_match_phi = []
-    mcp_mu_match_eta = []
+    # mcp_mu_pt = [] #mcp_mu = MCParticle muon
+    # mcp_mu_phi = []
+    # mcp_mu_eta = []
 
-    d_mu_dpt = [] #d_mu = difference between PFO muon and MCParticle muon
-    d_mu_drelpt = []
-    d_mu_dphi = []
-    d_mu_deta = []
+    # # mcp_mu_match_pt = [] #mcp_mu_match = MCParticle muon that was matched to a PFO muon
+    # # mcp_mu_match_phi = []
+    # # mcp_mu_match_eta = []
 
-    # TRACK
-    d0_res = [] #d0_res = d0 resolution
-    track_d0 = [] #d0_res_match = d0 resolution for matched muons
-    z0_res = [] #z0_res = z0 resolution
-    track_z0 = [] #z0_res_match = z0 resolution for matched muons
+    # # d_mu_dpt = [] #d_mu = difference between PFO muon and MCParticle muon
+    # # d_mu_drelpt = []
+    # # d_mu_dphi = []
+    # # d_mu_deta = []
 
-    nhits = []
-    pixel_nhits = []
-    inner_nhits = []
-    outer_nhits = []
-    pt_res_hits = []
+    # # TRACK
+    # d0_res = [] #d0_res = d0 resolution
+    # track_d0 = [] #d0_res_match = d0 resolution for matched muons
+    # z0_res = [] #z0_res = z0 resolution
+    # track_z0 = [] #z0_res_match = z0 resolution for matched muons
 
-    d0_res_vs_pt = []
-    d0_res_vs_eta = []
-    z0_res_vs_pt = []
-    z0_res_vs_eta = []
-    pt_res_vs_eta = [] #track muon pt resolution vs pt
-    pt_res_vs_pt = []
-    pt_res = []
+    # nhits = []
+    # pixel_nhits = []
+    # inner_nhits = []
+    # outer_nhits = []
+    # pt_res_hits = []
 
-    # Truth matched
-    track_pt = [] #This is track pt
-    track_eta = [] #This is track eta
-    track_phi = [] #This is track pt
-    track_theta = [] #This is track pt
-    track_ndf = []
-    track_chi2 = []
+    # d0_res_vs_pt = []
+    # d0_res_vs_eta = []
+    # z0_res_vs_pt = []
+    # z0_res_vs_eta = []
+    # pt_res_vs_eta = [] #track muon pt resolution vs pt
+    # pt_res_vs_pt = []
+    # pt_res = []
 
-    pt_match = [] #This is truth pt
-    eta_match = [] #This is truth eta
-    phi_match = []
-    theta_match = []
+    # # Truth matched
+    # track_pt = [] #This is track pt
+    # track_eta = [] #This is track eta
+    # track_phi = [] #This is track pt
+    # track_theta = [] #This is track pt
+    # track_ndf = []
+    # track_chi2 = []
 
-    # LC Relation track
-    LC_pt_match = []
-    LC_track_pt = []
-    LC_track_eta = []
-    LC_eta_match = []
-    LC_track_theta = []
-    LC_phi_match = []
-    LC_ndf = []
-    LC_chi2 = []
-    LC_d0 = []
-    LC_z0 = []
-    LC_nhits = []
-    LC_pixel_nhits = []
-    LC_inner_nhits = []
-    LC_outer_nhits = []
-    LC_pt_res = []
-    LC_dr = []
+    # pt_match = [] #This is truth pt
+    # eta_match = [] #This is truth eta
+    # phi_match = []
+    # theta_match = []
 
-    # Fake Tracks
-    fake_pt = []
-    fake_theta = []
-    fake_eta = []
-    fake_phi = []
-    fake_d0 = []
-    fake_z0 = []
-    fake_ndf = []
-    fake_chi2 = []
-    fake_nhits = []
-    fake_pixel_nhits = []
-    fake_inner_nhits = []
-    fake_outer_nhits = []
+    # # LC Relation track
+    # LC_track_pt = []
+    # LC_track_eta = []
+    # LC_track_phi = []
+    # LC_track_theta = []
+    # LC_track_d0 = []
+    # LC_track_z0 = []
+    # LC_track_ndf = []
+    # LC_track_chi2 = []
+    # LC_nhits = []
+    # LC_pixel_nhits = []
+    # LC_inner_nhits = []
+    # LC_outer_nhits = []
 
-    h2d_relpt = [] #pfo muon pt resolution vs pt
+    # LC_pt_match = []
+    # LC_eta_match = []
+    # LC_phi_match = []
+    # LC_pt_res = []
+    # LC_dr = []
+
+    # # Fake Tracks
+    # fake_pt = []
+    # fake_theta = []
+    # fake_eta = []
+    # fake_phi = []
+    # fake_d0 = []
+    # fake_z0 = []
+    # fake_ndf = []
+    # fake_chi2 = []
+    # fake_nhits = []
+    # fake_pixel_nhits = []
+    # fake_inner_nhits = []
+    # fake_outer_nhits = []
+
+    # h2d_relpt = [] #pfo muon pt resolution vs pt
 
     # no_inner_hits = 0
     event_counter = 0
@@ -334,14 +371,16 @@ def main(args):
 
     collection_names = [
         "MCParticle",
-        "PandoraPFOs",
-        "SiTracks",
-        "SiTracks_Refitted",
+        # "PandoraPFOs", # NOTE: Not present! Will keep relevant code/comments for now.
+        'AllTracks',
+        "SiTracks", # Note: Causes crash if AllTracks is not loaded too -- this basically holds pointers to AllTracks collection.
+        # "SeedTracks",
+        # "SiTracks_Refitted", # NOTE: Not present!
         "MCParticle_SiTracks",
-        "MCParticle_SiTracks_Refitted",
+        # "MCParticle_SiTracks_Refitted",
     ]
 
-    track_collection_name = 'SiTracks_Refitted' # TODO: eventually make this toggleable
+    track_collection_name = 'SiTracks' # TODO: eventually make this toggleable
     relation_collection_name = 'MCParticle_{}'.format(track_collection_name)
     assert(track_collection_name in collection_names)
     assert(relation_collection_name in collection_names)
@@ -359,14 +398,16 @@ def main(args):
         "VBTrackerHitsConed",
         "VETrackerHitsConed"
     ]
+    hit_collection_mask = {key:True for key in hit_collection_names} # TODO: Not sure if this works as intended? -Jan
 
-    hit_collection_mask = {key:True for key in hit_collection_names}
+    # get good branches
+    branch_list = collection_names + hit_collection_names
 
     reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
-    try:
-        reader.setReadCollectionNames(collection_names + hit_collection_names)
-    except:
-        reader.setReadCollectionNames(collection_names)
+    reader.setReadCollectionNames(branch_list)
+
+    num_events_total = GetNumEventsTotal(fnames,max_events)
+    print('Looping over {} events.'.format(num_events_total))
 
     # ############## LOOP OVER EVENTS AND FILL HISTOGRAMS  #############################
     # Loop over events
@@ -377,14 +418,16 @@ def main(args):
         for i,event in enumerate(reader):
             if max_events > 0 and event_counter >= max_events: break
 
-            if event_counter%100 == 0: print("Processing event %i."%event_counter)
+            # Events are typically quite large, so it is OK to print for each one:
+            # this is probably not going to be what slows down the code.
+            print('Processing event {}/{}'.format(i+1,num_events_total))
 
             # Get the collections we care about
             relation_collection = event.getCollection(relation_collection_name)
             relation = pyLCIO.UTIL.LCRelationNavigator(relation_collection)
 
             mcp_collection = event.getCollection("MCParticle")
-            pfo_collection = event.getCollection("PandoraPFOs")
+            # pfo_collection = event.getCollection("PandoraPFOs")
             track_collection = event.getCollection(track_collection_name)
 
             hit_collections = []
@@ -395,28 +438,29 @@ def main(args):
                     hit_collections.append(event.getCollection(hname))
                 except:
                     hit_collection_mask[hname] = False
-                    if(verbose):
+                    if(verbose > 0):
                         print('\tDid not find hit collection: {}. Disabling...'.format(hname))
                     pass
 
             # Make counter variables
             n_mcp_mu = 0
             n_pfo_mu = 0
-            has_pfo_mu = False
-            pfo_mu_vec = 0
+            # has_pfo_mu = False
+            # pfo_mu_vec = 0
 
-            # Pfos
-            pfo_dict = {
-                'pt':[],
-                'eta':[],
-                'phi':[]
-            }
+            # TODO: No PFO!
+            # # Pfos
+            # pfo_dict = {
+            #     'pt':[],
+            #     'eta':[],
+            #     'phi':[]
+            # }
 
-            pfo_mu_dict = {
-                'pt':[],
-                'eta':[],
-                'phi':[]
-            }
+            # pfo_mu_dict = {
+            #     'pt':[],
+            #     'eta':[],
+            #     'phi':[]
+            # }
 
             # Truth-level particles (a.k.a. "MCP" = Monte Carlo particle)
             mcp_dict = {
@@ -432,24 +476,25 @@ def main(args):
                 'phi':[]
             }
 
-            # MCP that was matched to PFO.
-            # TODO: Check that this matching is really working,
-            # this dict is filled in a MCP loop if some condition was met
-            # in a previous, separate PFO loop.
-            mcp_mu_match_dict = {
-                'pt':[],
-                'eta':[],
-                'phi':[]
-            }
+            #TODO: No PFO!
+            # # MCP that was matched to PFO.
+            # # TODO: Check that this matching is really working,
+            # # this dict is filled in a MCP loop if some condition was met
+            # # in a previous, separate PFO loop.
+            # mcp_mu_match_dict = {
+            #     'pt':[],
+            #     'eta':[],
+            #     'phi':[]
+            # }
 
-            # note this dictionary's structure is not like many of the others
-            d_mu_dict = {
-                'dpt':[],
-                'deta':[],
-                'dphi':[],
-                'relpt':[],
-                'pt_relpt':[]
-            }
+            # # note this dictionary's structure is not like many of the others
+            # d_mu_dict = {
+            #     'dpt':[],
+            #     'deta':[],
+            #     'dphi':[],
+            #     'relpt':[],
+            #     'pt_relpt':[]
+            # }
 
             # Tracks
             matched_track_dict = {
@@ -484,8 +529,29 @@ def main(args):
                 'ptres_eta':[]
             }
 
-            # id0_res_match = []
-            # iz0_res_match = []
+            # LC-matched tracks
+            lc_matched_track_dict = {
+                'pt':[],
+                'eta':[],
+                'phi':[],
+                'theta':[],
+                'd0':[],
+                'z0':[],
+                'ndf':[],
+                'chi2':[],
+                'nhits':[],
+                'ptres':[],
+                'pixel_nhit':[],
+                'inner_nhit':[],
+                'outer_nhit':[]
+            }
+
+            # LC-matched MCPs
+            lc_matched_mcp_dict = {
+                'pt':[],
+                'eta':[],
+                'phi':[]
+            }
 
             # Fake Tracks
             fake_track_dict = {
@@ -497,39 +563,43 @@ def main(args):
                 'z0':[],
                 'ndf':[],
                 'chi2':[],
-                'nhits':[]
+                'nhits':[],
+                'pixel_nhit':[],
+                'inner_nhit':[],
+                'outer_nhit':[]
             }
 
-            pfo_mu_index = None
+            # pfo_mu_index = None
             mcp_muon_index = None
             has_fake_tracks = False
 
-            ##################################################################
-            # Loop over the reconstructed objects and fill histograms
-            for j,pfo in enumerate(pfo_collection):
+            # ##################################################################
+            # # Loop over the reconstructed objects and fill histograms
+            # for j,pfo in enumerate(pfo_collection):
 
-                FillKinematicDict(pfo,pfo_dict)
+            #     FillKinematicDict(pfo,pfo_dict)
 
-                # hists["pfo_pt"].Fill(pfo_tlv.Perp())
-                # hists["pfo_eta"].Fill(pfo_tlv.Eta())
-                # hists["pfo_phi"].Fill(pfo_tlv.Phi())
+            #     # hists["pfo_pt"].Fill(pfo_tlv.Perp())
+            #     # hists["pfo_eta"].Fill(pfo_tlv.Eta())
+            #     # hists["pfo_phi"].Fill(pfo_tlv.Phi())
 
 
-                if abs(pfo.getType())==13:
-                    # hists["pfo_mu_pt"].Fill(pfo_tlv.Perp())
-                    # hists["pfo_mu_eta"].Fill(pfo_tlv.Eta())
-                    # hists["pfo_mu_phi"].Fill(pfo_tlv.Phi())
+            #     if abs(pfo.getType())==13:
+            #         # hists["pfo_mu_pt"].Fill(pfo_tlv.Perp())
+            #         # hists["pfo_mu_eta"].Fill(pfo_tlv.Eta())
+            #         # hists["pfo_mu_phi"].Fill(pfo_tlv.Phi())
 
-                    FillKinematicDict(pfo,pfo_mu_dict)
-                    # NOTE: This this only keeps the last instance of pfo_mu. Probably OK, since we're using muon gun samples -- but good to keep in mind. -Jan
-                    pfo_mu_index = j # keep track of this - will use in track loop later below.
-                    n_pfo_mu += 1
-                    has_pfo_mu = True
-            ##################################################################
+            #         FillKinematicDict(pfo,pfo_mu_dict)
+            #         # NOTE: This this only keeps the last instance of pfo_mu. Probably OK, since we're using muon gun samples -- but good to keep in mind. -Jan
+            #         pfo_mu_index = j # keep track of this - will use in track loop later below.
+            #         n_pfo_mu += 1
+            #         has_pfo_mu = True
+            # ##################################################################
 
             ##################################################################
             # Loop over the truth objects and fill histograms
             for j,mcp in enumerate(mcp_collection):
+                print('MCP: [{}/{}]'.format(j+1,len(mcp_collection)))
                 FillKinematicDict(mcp,mcp_dict)
 
                 # hists["mcp_pt"].Fill(mcp_tlv.Perp())
@@ -552,71 +622,68 @@ def main(args):
                     # print("Truth pt, eta, phi:", mcp_tlv.Perp(), mcp_tlv.Eta(), mcp_tlv.Phi())
 
                     mcp_vec = GetFourVector(mcp)
-                    if(mcp_vec.Pt() > track_pt_min): # Remove ultra-low pt tracks
+                    if(mcp_vec.Pt() > track_pt_min): # Remove ultra-low pt MCPs # TODO: Comment originally implied removing low-pT tracks but this is applied to MCPs! -Jan
+
+                        # TODO: Looping over "tracks" sometimes causes issues, elements are then reported as being of parent class LCObject. Could this correspond w/ empty list?
                         tracks = relation.getRelatedToObjects(mcp)
+                        try: # to deal with the above-mentioned issue
+                            for k,track in enumerate(tracks):
+                                print('\ttrack: [{}/{}]'.format(k+1,len(tracks)))
+                                # theta = np.pi/2- np.arctan(track.getTanLambda())
+                                # phi = track.getPhi()
+                                # eta = -np.log(np.tan(theta/2))
+                                # pt  = 0.3 * Bfield / np.abs(track.getOmega() * 1000.)
+                                # track_tlv = rt.TLorentzVector()
+                                # track_tlv.SetPtEtaPhiE(pt, eta, phi, 0)
 
-                        for k,track in enumerate(tracks):
-                            # theta = np.pi/2- np.arctan(track.getTanLambda())
-                            # phi = track.getPhi()
-                            # eta = -np.log(np.tan(theta/2))
-                            # pt  = 0.3 * Bfield / np.abs(track.getOmega() * 1000.)
-                            # track_tlv = rt.TLorentzVector()
-                            # track_tlv.SetPtEtaPhiE(pt, eta, phi, 0)
+                                track_container = Track(track,Bfield)
 
-                            track_container = Track(track,Bfield)
+                                track_vec = track_container.GetVector()
+                                dr = rt.Math.VectorUtil.DeltaR(track_vec,mcp_vec)
+                                ptres = (mcp_vec.Pt() - track_vec.Pt()) / mcp_vec.Pt()
 
-                            track_vec = track_container.GetVector()
-                            dr = rt.Math.VectorUtil.DeltaR(track_vec,mcp_vec)
-                            ptres = (mcp_vec.Pt() - track_vec.Pt()) / mcp_vec.Pt()
+                                # TODO: Why the extra nesting in lists of length 1? -Jan
 
-                            # TODO: Why the extra nesting in lists of length 1? -Jan
-                            LC_track_pt.append([track_vec.Pt()])
-                            LC_track_eta.append([track_vec.Eta()])
+                                FillKinematicDict(track_container,lc_matched_track_dict)
+                                FillKinematicDict(mcp,lc_matched_mcp_dict)
 
-                            LC_pt_match.append([mcp_vec.Pt()])
-                            LC_eta_match.append([mcp_vec.Eta()])
+                                # Fill some extra things
+                                lc_matched_track_dict['ptres'].append(ptres)
+                                lc_matched_track_dict['dr'].append(dr)
 
-                            LC_track_theta.append([track_vec.Theta()]) # theta = np.pi/2- np.arctan(track.getTanLambda())
-                            LC_phi_match.append([track_vec.Phi()])
-                            LC_ndf.append([track.getNdf()])
-                            LC_chi2.append([track.getChi2()])
-                            LC_d0.append([track.getD0()])
-                            LC_z0.append([track.getZ0()])
-                            LC_nhits.append([track.getTrackerHits().size()])
-                            LC_pt_res.append([ptres])
-                            LC_dr.append([dr])
+                                if(len(hit_collections) > 0):
+                                    LC_pixel_nhit, LC_inner_nhit, LC_outer_nhit = NHitsPerLayer(track,hit_collections[0])
+                                    lc_matched_track_dict['pixel_nhit'].append([LC_pixel_nhit])
+                                    lc_matched_track_dict['inner_nhit'].append([LC_inner_nhit])
+                                    lc_matched_track_dict['outer_nhit'].append([LC_outer_nhit])
 
-                            if(len(hit_collections) > 0):
-                                LC_pixel_nhit, LC_inner_nhit, LC_outer_nhit = NHitsPerLayer(track,hit_collections[0])
-                                LC_pixel_nhits.append([LC_pixel_nhit])
-                                LC_inner_nhits.append([LC_inner_nhit])
-                                LC_outer_nhits.append([LC_outer_nhit])
-
-                            num_matched_tracks += 1
-                            if hard_rad: # TODO: Not sure this is correct? Doesn't look like anything is being discarded. -Jan
-                                hard_rad_discard += 1
+                                num_matched_tracks += 1
+                                if hard_rad: # TODO: Not sure this is correct? Doesn't look like anything is being discarded. -Jan
+                                    hard_rad_discard += 1
+                        except:
+                            pass
 
                         # For events in which a PFO mu was reconstructed, fill histograms that will
                         # be used for efficiency. Both numerator and denominator must be filled with truth values!
                         # Also fill resolution histograms
-                        if has_pfo_mu:
-                            # hists["mcp_mu_match_pt"].Fill(mcp_tlv.Perp())
-                            # hists["mcp_mu_match_eta"].Fill(mcp_tlv.Eta())
-                            # hists["mcp_mu_match_phi"].Fill(mcp_tlv.Phi())
+                        # if has_pfo_mu:
+                        #     # hists["mcp_mu_match_pt"].Fill(mcp_tlv.Perp())
+                        #     # hists["mcp_mu_match_eta"].Fill(mcp_tlv.Eta())
+                        #     # hists["mcp_mu_match_phi"].Fill(mcp_tlv.Phi())
 
-                            FillKinematicDict(mcp, mcp_mu_match_dict)
+                        #     FillKinematicDict(mcp, mcp_mu_match_dict)
 
-                            pfo_mu_vec = GetFourVector(pfo_collection[pfo_mu_index])
-                            # hists["d_mu_dpt"].Fill(pfo_mu_vec.Perp() - mcp_tlv.Perp())
-                            # hists["d_mu_drelpt"].Fill((pfo_mu_vec.Perp() - mcp_tlv.Perp())/mcp_tlv.Perp())
-                            # hists["d_mu_deta"].Fill(pfo_mu_vec.Eta() - mcp_tlv.Eta())
-                            # hists["d_mu_dphi"].Fill(pfo_mu_vec.Phi() - mcp_tlv.Phi())
-                            # h_2d_relpt.Fill(mcp_tlv.Perp(), (pfo_mu_vec.Perp() - mcp_tlv.Perp())/mcp_tlv.Perp())
-                            d_mu_dict['dpt'].append(pfo_mu_vec.Pt() - mcp_vec.Pt())
-                            d_mu_dict['drelpt'].append((pfo_mu_vec.Pt() - mcp_vec.Pt())/mcp_vec.Pt())
-                            d_mu_dict['deta'].append(pfo_mu_vec.Eta() - mcp_vec.Eta())
-                            d_mu_dict['dphi'].append(pfo_mu_vec.Phi() - mcp_vec.Phi())
-                            d_mu_dict['pt_relpt'].append([mcp_vec.Pt(), (pfo_mu_vec.Pt() - mcp_vec.Pt())/mcp_vec.Pt()])
+                        #     pfo_mu_vec = GetFourVector(pfo_collection[pfo_mu_index])
+                        #     # hists["d_mu_dpt"].Fill(pfo_mu_vec.Perp() - mcp_tlv.Perp())
+                        #     # hists["d_mu_drelpt"].Fill((pfo_mu_vec.Perp() - mcp_tlv.Perp())/mcp_tlv.Perp())
+                        #     # hists["d_mu_deta"].Fill(pfo_mu_vec.Eta() - mcp_tlv.Eta())
+                        #     # hists["d_mu_dphi"].Fill(pfo_mu_vec.Phi() - mcp_tlv.Phi())
+                        #     # h_2d_relpt.Fill(mcp_tlv.Perp(), (pfo_mu_vec.Perp() - mcp_tlv.Perp())/mcp_tlv.Perp())
+                        #     d_mu_dict['dpt'].append(pfo_mu_vec.Pt() - mcp_vec.Pt())
+                        #     d_mu_dict['drelpt'].append((pfo_mu_vec.Pt() - mcp_vec.Pt())/mcp_vec.Pt())
+                        #     d_mu_dict['deta'].append(pfo_mu_vec.Eta() - mcp_vec.Eta())
+                        #     d_mu_dict['dphi'].append(pfo_mu_vec.Phi() - mcp_vec.Phi())
+                        #     d_mu_dict['pt_relpt'].append([mcp_vec.Pt(), (pfo_mu_vec.Pt() - mcp_vec.Pt())/mcp_vec.Pt()])
             ##################################################################
 
             if(n_mcp_mu > 1):
@@ -629,18 +696,19 @@ def main(args):
             max_hits = 0
             best_track = None
             for j,track in enumerate(track_collection):
+                print('Track: [{}/{}]'.format(j+1,len(track_collection)))
 
                 track_container = Track(track,Bfield)
 
                 # Get the deltaR between each track and the truth muon.
                 # TODO: This is notably different than in the old code, which effectively
                 #       checked dR against mcp_vec (which would be whatever was the last
-                #       truth particle from the above loops!).
+                #       truth particle from the above loops!). #TODO: FIX THIS!!!
                 dr = rt.Math.VectorUtil.DeltaR(track_container.GetVector(),mcp_vec)
 
                 # Fake tracks
                 if(len(relation.getRelatedFromObjects(track)) == 0): # If there's no associated truth muon
-                    has_fake_tracks = True
+                    # has_fake_tracks = True
                     FillKinematicDict(track_container,fake_track_dict)
 
                     fake_pixel_nhit = 0
@@ -648,22 +716,30 @@ def main(args):
                     fake_outer_nhit = 0
                     if(len(hit_collections) > 0):
                         fake_pixel_nhit, fake_inner_nhit, fake_outer_nhit = NHitsPerLayer(track,hit_collections[0])
-                        fake_pixel_nhits.append(fake_pixel_nhit)
-                        fake_inner_nhits.append(fake_inner_nhit)
-                        fake_outer_nhits.append(fake_outer_nhit)
+                        fake_track_dict['pixel_nhits'].append(fake_pixel_nhit)
+                        fake_track_dict['inner_nhits'].append(fake_inner_nhit)
+                        fake_track_dict['outer_nhits'].append(fake_outer_nhit)
                     num_fake_tracks += 1
+                else:
+                    pass # TODO: Could do something with LC relations here?
 
-                if dr < min_dr: # Do dR check first, then do nhits check
-                    if track_container.GetNHits() > max_hits:
-                        max_hits = track_container.GetNHits()
-                        best_track = track_container
-                    counter += 1
-                    if counter > 1:
-                        num_dupes += 1
+
+                # Also find track nearest to truth-level muon in (eta,phi), if it exists!
+                if(mcp_muon_index is not None):
+                    muon_vec = GetFourVector(mcp_collection[mcp_muon_index])
+                    dr = rt.Math.VectorUtil.DeltaR(track_container.GetVector(), muon_vec)
+
+                    if dr < min_dr: # Do dR check first, then do nhits check
+                        if track_container.GetNHits() > max_hits:
+                            max_hits = track_container.GetNHits()
+                            best_track = track_container
+                        counter += 1
+                        if counter > 1:
+                            num_dupes += 1
                         # print("More than one track in event! # of dupes:", num_dupes)
             ##################################################################################
 
-            # Now compute some resolution stuff, using the track most closely dR-matched to
+            # Compute some resolution stuff, using the track most closely dR-matched to the truth-level muon
             if best_track is not None:
 
                 # hists["d0_res"].Fill(d0) # TODO: This seems wrong, d0_res filled with just d0? Similar issue below.-Jan
@@ -714,85 +790,117 @@ def main(args):
 
             # Now fill a bunch of things.
 
-            # Truth-level particles.
-            mcp_pt.append(mcp_dict['pt'])
-            mcp_eta.append(mcp_dict['eta'])
-            mcp_phi.append(mcp_dict['phi'])
+            print('\t\tFilling.')
 
-            # Truth-level muons.
-            if(not hard_rad):
-                # filling with truth-level muon
-                mcp_mu_pt.append(mcp_mu_dict['pt'])
-                mcp_mu_eta.append(mcp_mu_dict['eta'])
-                mcp_mu_phi.append(mcp_mu_dict['phi'])
+            if(mode=='json'):
 
-                # filling with mu-matched pfo
-                if(has_pfo_mu):
-                    mcp_mu_match_pt.append(mcp_mu_match_dict['pt'])
-                    mcp_mu_match_eta.append(mcp_mu_match_dict['eta'])
-                    mcp_mu_match_phi.append(mcp_mu_match_dict['phi'])
+                for key,val in mcp_dict.items():
+                    writer.Append('mcp_{}'.format(key),val)
 
-                    d_mu_dpt.append(d_mu_dict['dpt'])
-                    d_mu_drelpt.append(d_mu_dict['drelpt'])
-                    d_mu_deta.append(d_mu_dict['deta'])
-                    d_mu_dphi.append(d_mu_dict['dphi'])
-                    h2d_relpt.append(d_mu_dict['pt_relpt'])
+                for key,val in mcp_mu_dict.items():
+                    writer.Append('mcp_mu_{}'.format(key),val)
 
-            # If available, fill information on resolution as well as the matched track
-            if(best_track is not None):
-                # d0_res.append(id0_res)
-                # z0_res.append(iz0_res)
-                # nhits.append(inhits)
+                for key,val in matched_track_dict.items():
+                    writer.Append('dr_matched_track_{}'.format(key),val)
 
-                # TODO: these might need fixing
-                pixel_nhits.append([pixel_nhit])
-                inner_nhits.append([inner_nhit])
-                outer_nhits.append([outer_nhit])
+                for key,val in matched_muon_dict.items():
+                    writer.Append('dr_matched_muon_{}'.format(key),val)
 
-                # Resolution stuff
-                d0_res_vs_pt.append( resolution_dict['d0res_pt'] )
-                d0_res_vs_eta.append(resolution_dict['d0res_eta'])
-                z0_res_vs_pt.append( resolution_dict['z0res_pt'] )
-                z0_res_vs_eta.append(resolution_dict['z0res_eta'])
-                pt_res_vs_pt.append( resolution_dict['ptres_pt'] )
-                pt_res_vs_eta.append(resolution_dict['ptres_eta'])
-                pt_res.append(       resolution_dict['ptres']    )
+                for key,val in resolution_dict.items():
+                        writer.Append('dr_matched_resolution_{}'.format(key),val)
 
-                # Matched track stuff
-                track_pt.append(matched_track_dict['pt'])
-                track_eta.append(matched_track_dict['eta'])
-                track_phi.append(matched_track_dict['phi'])
-                track_theta.append(matched_track_dict['theta'])
-                track_d0.append(matched_track_dict['d0'])
-                track_z0.append(matched_track_dict['z0'])
-                track_ndf.append(matched_track_dict['ndf'])
-                track_chi2.append(matched_track_dict['chi2'])
+                for key,val in lc_matched_track_dict.items():
+                            writer.Append('lc_matched_track_{}'.format(key),val)
 
-                # Track-matched muon stuff
-                pt_match.append(   matched_muon_dict['pt'])
-                eta_match.append(  matched_muon_dict['eta'])
-                theta_match.append(matched_muon_dict['theta'])
-                phi_match.append(  matched_muon_dict['phi'])
+                for key,val in lc_matched_mcp_dict.items():
+                            writer.Append('lc_matched_mcp_{}'.format(key),val)
 
-            pfo_pt.append(pfo_dict['pt'])
-            pfo_eta.append(pfo_dict['eta'])
-            pfo_phi.append(pfo_dict['phi'])
-            pfo_mu_pt.append(pfo_mu_dict['pt'])
-            pfo_mu_eta.append(pfo_mu_dict['eta'])
-            pfo_mu_phi.append(pfo_mu_dict['phi'])
+                for key,val in fake_track_dict.items():
+                            writer.Append('fake_track_{}'.format(key),val)
 
-            # if there are fake tracks, record them too
-            if(has_fake_tracks):
-                fake_pt.append(fake_track_dict['pt'])
-                fake_eta.append(fake_track_dict['eta'])
-                fake_phi.append(fake_track_dict['phi'])
-                fake_theta.append(fake_track_dict['theta'])
-                fake_d0.append(fake_track_dict['d0'])
-                fake_z0.append(fake_track_dict['z0'])
-                fake_ndf.append(fake_track_dict['ndf'])
-                fake_chi2.append(fake_track_dict['chi2'])
-                fake_nhits.append(fake_track_dict['nhits'])
-            #     # print(fake_pt)
+            # # Truth-level particles.
+            # mcp_pt.append(mcp_dict['pt'])
+            # mcp_eta.append(mcp_dict['eta'])
+            # mcp_phi.append(mcp_dict['phi'])
+
+            # # Truth-level muons.
+            # if(not hard_rad):
+            #     # filling with truth-level muon
+            #     mcp_mu_pt.append(mcp_mu_dict['pt'])
+            #     mcp_mu_eta.append(mcp_mu_dict['eta'])
+            #     mcp_mu_phi.append(mcp_mu_dict['phi'])
+
+            #     # TODO: No PFO!
+            #     # # filling with mu-matched pfo
+            #     # if(has_pfo_mu):
+            #     #     mcp_mu_match_pt.append(mcp_mu_match_dict['pt'])
+            #     #     mcp_mu_match_eta.append(mcp_mu_match_dict['eta'])
+            #     #     mcp_mu_match_phi.append(mcp_mu_match_dict['phi'])
+
+            #     #     d_mu_dpt.append(d_mu_dict['dpt'])
+            #     #     d_mu_drelpt.append(d_mu_dict['drelpt'])
+            #     #     d_mu_deta.append(d_mu_dict['deta'])
+            #     #     d_mu_dphi.append(d_mu_dict['dphi'])
+            #     #     h2d_relpt.append(d_mu_dict['pt_relpt'])
+
+            # # If available, fill information on resolution as well as the matched track
+            # if(best_track is not None):
+            #     # d0_res.append(id0_res)
+            #     # z0_res.append(iz0_res)
+            #     # nhits.append(inhits)
+
+            #     # TODO: these might need fixing
+            #     pixel_nhits.append([pixel_nhit])
+            #     inner_nhits.append([inner_nhit])
+            #     outer_nhits.append([outer_nhit])
+
+            #     # Resolution stuff
+            #     d0_res_vs_pt.append( resolution_dict['d0res_pt'] )
+            #     d0_res_vs_eta.append(resolution_dict['d0res_eta'])
+            #     z0_res_vs_pt.append( resolution_dict['z0res_pt'] )
+            #     z0_res_vs_eta.append(resolution_dict['z0res_eta'])
+            #     pt_res_vs_pt.append( resolution_dict['ptres_pt'] )
+            #     pt_res_vs_eta.append(resolution_dict['ptres_eta'])
+            #     pt_res.append(       resolution_dict['ptres']    )
+
+            #     # Matched track stuff
+            #     track_pt.append(matched_track_dict['pt'])
+            #     track_eta.append(matched_track_dict['eta'])
+            #     track_phi.append(matched_track_dict['phi'])
+            #     track_theta.append(matched_track_dict['theta'])
+            #     track_d0.append(matched_track_dict['d0'])
+            #     track_z0.append(matched_track_dict['z0'])
+            #     track_ndf.append(matched_track_dict['ndf'])
+            #     track_chi2.append(matched_track_dict['chi2'])
+
+            #     # Track-matched muon stuff
+            #     pt_match.append(   matched_muon_dict['pt'])
+            #     eta_match.append(  matched_muon_dict['eta'])
+            #     theta_match.append(matched_muon_dict['theta'])
+            #     phi_match.append(  matched_muon_dict['phi'])
+
+            # # TODO: No PFO!
+            # # pfo_pt.append(pfo_dict['pt'])
+            # # pfo_eta.append(pfo_dict['eta'])
+            # # pfo_phi.append(pfo_dict['phi'])
+            # # pfo_mu_pt.append(pfo_mu_dict['pt'])
+            # # pfo_mu_eta.append(pfo_mu_dict['eta'])
+            # # pfo_mu_phi.append(pfo_mu_dict['phi'])
+
+            # # if there are fake tracks, record them too
+            # if(has_fake_tracks):
+            #     fake_pt.append(fake_track_dict['pt'])
+            #     fake_eta.append(fake_track_dict['eta'])
+            #     fake_phi.append(fake_track_dict['phi'])
+            #     fake_theta.append(fake_track_dict['theta'])
+            #     fake_d0.append(fake_track_dict['d0'])
+            #     fake_z0.append(fake_track_dict['z0'])
+            #     fake_ndf.append(fake_track_dict['ndf'])
+            #     fake_chi2.append(fake_track_dict['chi2'])
+            #     fake_nhits.append(fake_track_dict['nhits'])
+            # #     # print(fake_pt)
+
+
             event_counter += 1
         reader.close()
 
@@ -810,92 +918,94 @@ def main(args):
     # # print('\t%i hard radiations discarded'%hard_rad_discard)
     # print('\t{} fake tracks'.format(num_fake_tracks))
     # # print('\t%i GeV'%np.max(mcp_mu_pt))
-    return
 
-    # Make a list of all the data you want to save
-    data_list = {}
-    data_list["mcp_pt"] = mcp_pt
-    data_list["mcp_eta"] = mcp_eta
-    data_list["mcp_phi"] = mcp_phi
-    data_list["mcp_mu_pt"] = mcp_mu_pt
-    data_list["mcp_mu_eta"] = mcp_mu_eta
-    data_list["mcp_mu_phi"] = mcp_mu_phi
+    if(mode=='json'):
+        writer.Write()
 
-    # data_list["pfo_pt"] = pfo_pt
-    # data_list["pfo_eta"] = pfo_eta
-    # data_list["pfo_phi"] = pfo_phi
-    # data_list["pfo_mu_pt"] = pfo_mu_pt
-    # data_list["pfo_mu_eta"] = pfo_mu_eta
-    # data_list["pfo_mu_phi"] = pfo_mu_phi
+    # # Make a list of all the data you want to save
+    # data_list = {}
+    # data_list["mcp_pt"] = mcp_pt
+    # data_list["mcp_eta"] = mcp_eta
+    # data_list["mcp_phi"] = mcp_phi
+    # data_list["mcp_mu_pt"] = mcp_mu_pt
+    # data_list["mcp_mu_eta"] = mcp_mu_eta
+    # data_list["mcp_mu_phi"] = mcp_mu_phi
 
-    # data_list["mcp_mu_match_pt"] = mcp_mu_match_pt
-    # data_list["mcp_mu_match_eta"] = mcp_mu_match_eta
-    # data_list["mcp_mu_match_phi"] = mcp_mu_match_phi
-    # data_list["d_mu_dpt"] = d_mu_dpt
-    # data_list["d_mu_drelpt"] = d_mu_drelpt
-    # data_list["d_mu_dphi"] = d_mu_dphi
-    # data_list["d_mu_deta"] = d_mu_deta
+    # # data_list["pfo_pt"] = pfo_pt
+    # # data_list["pfo_eta"] = pfo_eta
+    # # data_list["pfo_phi"] = pfo_phi
+    # # data_list["pfo_mu_pt"] = pfo_mu_pt
+    # # data_list["pfo_mu_eta"] = pfo_mu_eta
+    # # data_list["pfo_mu_phi"] = pfo_mu_phi
 
-    data_list["d0_res"] = d0_res
-    data_list["z0_res"] = z0_res
-    data_list["nhits"] = nhits
-    data_list["pixel_nhits"] = pixel_nhits
-    data_list["inner_nhits"] = inner_nhits
-    data_list["outer_nhits"] = outer_nhits
-    data_list["pt_res_hits"] = pt_res_hits
-    data_list["d0_res_vs_pt"] = d0_res_vs_pt
-    data_list["d0_res_vs_eta"] = d0_res_vs_eta
-    data_list["z0_res_vs_pt"] = z0_res_vs_pt
-    data_list["z0_res_vs_eta"] = z0_res_vs_eta
-    data_list["pt_res_vs_eta"] = pt_res_vs_eta
-    data_list["pt_res_vs_pt"] = pt_res_vs_pt
-    data_list["pt_res"] = pt_res
-    data_list["pt_match"] = pt_match
-    data_list["track_pt"] = track_pt
-    data_list["track_eta"] = track_eta
-    data_list["eta_match"] = eta_match
-    data_list["theta_match"] = theta_match
-    data_list["phi_match"] = phi_match
-    data_list["track_ndf"] = track_ndf
-    data_list["track_chi2"] = track_chi2
-    data_list["track_d0"] = track_d0
-    data_list["track_z0"] = track_z0
+    # # data_list["mcp_mu_match_pt"] = mcp_mu_match_pt
+    # # data_list["mcp_mu_match_eta"] = mcp_mu_match_eta
+    # # data_list["mcp_mu_match_phi"] = mcp_mu_match_phi
+    # # data_list["d_mu_dpt"] = d_mu_dpt
+    # # data_list["d_mu_drelpt"] = d_mu_drelpt
+    # # data_list["d_mu_dphi"] = d_mu_dphi
+    # # data_list["d_mu_deta"] = d_mu_deta
 
-    data_list["LC_pt_match"] = LC_pt_match
-    data_list["LC_track_pt"] = LC_track_pt
-    data_list["LC_track_eta"] = LC_track_eta
-    data_list["LC_eta_match"] = LC_eta_match
-    data_list["LC_track_theta"] = LC_track_theta
-    data_list["LC_phi_match"] = LC_phi_match
-    data_list["LC_ndf"] = LC_ndf
-    data_list["LC_chi2"] = LC_chi2
-    data_list["LC_d0"] = LC_d0
-    data_list["LC_z0"] = LC_z0
-    data_list["LC_nhits"] = LC_nhits
-    data_list["LC_pixel_nhits"] = LC_pixel_nhits
-    data_list["LC_inner_nhits"] = LC_inner_nhits
-    data_list["LC_outer_nhits"] = LC_outer_nhits
-    data_list["LC_pt_res"] = LC_pt_res
-    data_list["LC_dr"] = LC_dr
+    # data_list["d0_res"] = d0_res
+    # data_list["z0_res"] = z0_res
+    # data_list["nhits"] = nhits
+    # data_list["pixel_nhits"] = pixel_nhits
+    # data_list["inner_nhits"] = inner_nhits
+    # data_list["outer_nhits"] = outer_nhits
+    # data_list["pt_res_hits"] = pt_res_hits
+    # data_list["d0_res_vs_pt"] = d0_res_vs_pt
+    # data_list["d0_res_vs_eta"] = d0_res_vs_eta
+    # data_list["z0_res_vs_pt"] = z0_res_vs_pt
+    # data_list["z0_res_vs_eta"] = z0_res_vs_eta
+    # data_list["pt_res_vs_eta"] = pt_res_vs_eta
+    # data_list["pt_res_vs_pt"] = pt_res_vs_pt
+    # data_list["pt_res"] = pt_res
+    # data_list["pt_match"] = pt_match
+    # data_list["track_pt"] = track_pt
+    # data_list["track_eta"] = track_eta
+    # data_list["eta_match"] = eta_match
+    # data_list["theta_match"] = theta_match
+    # data_list["phi_match"] = phi_match
+    # data_list["track_ndf"] = track_ndf
+    # data_list["track_chi2"] = track_chi2
+    # data_list["track_d0"] = track_d0
+    # data_list["track_z0"] = track_z0
 
-    data_list["fake_pt"] = fake_pt
-    data_list["fake_theta"] = fake_theta
-    data_list["fake_eta"] = fake_eta
-    data_list["fake_phi"] = fake_phi
-    data_list["fake_d0"] = fake_d0
-    data_list["fake_z0"] = fake_z0
-    data_list["fake_ndf"] = fake_ndf
-    data_list["fake_chi2"] = fake_chi2
-    data_list["fake_nhits"] = fake_nhits
-    data_list["fake_pixel_nhits"] = fake_pixel_nhits
-    data_list["fake_inner_nhits"] = fake_inner_nhits
-    data_list["fake_outer_nhits"] = fake_outer_nhits
+    # data_list["LC_pt_match"] = LC_pt_match
+    # data_list["LC_track_pt"] = LC_track_pt
+    # data_list["LC_track_eta"] = LC_track_eta
+    # data_list["LC_eta_match"] = LC_eta_match
+    # data_list["LC_track_theta"] = LC_track_theta
+    # data_list["LC_phi_match"] = LC_phi_match
+    # data_list["LC_track_d0"] = LC_track_d0
+    # data_list["LC_track_z0"] = LC_track_z0
+    # data_list["LC_track_ndf"] = LC_track_ndf
+    # data_list["LC_track_chi2"] = LC_track_chi2
+    # data_list["LC_nhits"] = LC_nhits
+    # data_list["LC_pixel_nhits"] = LC_pixel_nhits
+    # data_list["LC_inner_nhits"] = LC_inner_nhits
+    # data_list["LC_outer_nhits"] = LC_outer_nhits
+    # data_list["LC_pt_res"] = LC_pt_res
+    # data_list["LC_dr"] = LC_dr
 
-    data_list["h_2d_relpt"] = h2d_relpt
+    # data_list["fake_pt"] = fake_pt
+    # data_list["fake_theta"] = fake_theta
+    # data_list["fake_eta"] = fake_eta
+    # data_list["fake_phi"] = fake_phi
+    # data_list["fake_d0"] = fake_d0
+    # data_list["fake_z0"] = fake_z0
+    # data_list["fake_ndf"] = fake_ndf
+    # data_list["fake_chi2"] = fake_chi2
+    # data_list["fake_nhits"] = fake_nhits
+    # data_list["fake_pixel_nhits"] = fake_pixel_nhits
+    # data_list["fake_inner_nhits"] = fake_inner_nhits
+    # data_list["fake_outer_nhits"] = fake_outer_nhits
 
-    # After the loop is finished, save the data_list to a .json file
-    with open(output_json, 'w') as fp:
-        json.dump(data_list, fp)
+    # data_list["h_2d_relpt"] = h2d_relpt
+
+    # # After the loop is finished, save the data_list to a .json file
+    # with open(output_json, 'w') as fp:
+    #     json.dump(data_list, fp)
 
     # # Draw all the 1D histograms you filled
     # for i, h in enumerate(hists):
