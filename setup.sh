@@ -10,4 +10,4 @@ source /cvmfs/muoncollider.cern.ch/release/2.9/setup.sh
 ## To handle numpy, we will use a virtual environment
 ## in which we can install it via pip.
 # TODO: Disabling this, since it might not be a good thing to incl. in repo. -Jan
-#source ${SCRIPT_DIR}/env/mucol/bin/activate
+source ${SCRIPT_DIR}/env/mucol/bin/activate
