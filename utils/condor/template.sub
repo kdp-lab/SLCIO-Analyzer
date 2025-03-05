@@ -1,0 +1,22 @@
+####################
+#
+# HTCondor submit description file
+#
+####################
+
+batch_name              = $BATCH_NAME
+executable              = condor_job.sh
+arguments               = "$(unique_args)"
+initialdir              = job$(Process)
+should_transfer_files   = IF_NEEDED
+when_to_transfer_output = ON_EXIT
+transfer_input_files    = ../payload.tar.gz, inputs.txt
+transfer_output_files   = ""
+log                     = job.log
+error                   = job.err
+output                  = job.out
+requirements            = $REQUIREMENTS
+RequestCpus             = $NCPU
+RequestMemory           = $MEM
+$SHORT_QUEUE
+queue unique_args from arguments.txt
