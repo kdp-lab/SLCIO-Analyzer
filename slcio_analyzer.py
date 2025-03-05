@@ -546,7 +546,7 @@ def main(args):
 
     # Some condor-specific args
     parser.add_argument('-r','--runDir',type=str,default='run', help='Run directory for jobs. [condor only]')
-
+    parser.add_argument('-O','--outputDir',type=str,default=None, help='Output directory for jobs. [condor only]')
 
     args = vars(parser.parse_args())
 
@@ -558,21 +558,33 @@ def main(args):
     use_condor = args['condor'] > 0
 
     run_dir = args['runDir']
+    output_dir = args['outputDir']
 
     if(use_condor):
+
+        assert(output_dir is not None)
+
         # Creating condor jobs.
         condor_runner = CondorRunner()
 
         this_dir = os.path.dirname(os.path.realpath(__file__))
-        template = '{}/utils/condor/template.sub'
-        executable = '{}/utils/condor/condor_job.sh'
+        template = '{}/utils/condor/template.sub'.format(this_dir)
+        executable = '{}/utils/condor/condor_job.sh'.format(this_dir)
+        # payload_contents = [
+        #     '{}/slcio_analyzer.py'.format(this_dir),
+        #     '{}/utils'.format(this_dir)
+        # ]
         payload_contents = [
-            '{}/slcio_analyzer.py'.format(this_dir),
-            '{}/utils'.format(this_dir)
+            'slcio_analyzer.py',
+            'utils'
         ]
         arguments_file = 'arguments.txt'
-        condor_runner.SetRunDirectory(run_dir)
 
+        condor_runner.SetScriptDirectory(this_dir) # useful specifically for things like the tar command it runs
+        condor_runner.SetRunDirectory(run_dir)
+        condor_runner.SetOutputDirectory(output_dir)
+        condor_runner.SetOutputName(output_filename.split('.')[-2])
+        condor_runner.SetBatchName('SLCIO-Analyzer')
         condor_runner.run(template,executable,payload_contents,args['inputFile'],arguments_file)
 
 

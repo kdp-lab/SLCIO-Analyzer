@@ -12,9 +12,15 @@ class CondorRunner:
         self.ncpu = 1
         self.memory = 4096 # MiB
         self.out_dir = None
+        self.SetScriptDirectory(os.path.dirname(os.path.realpath(__file__)) + '/../../')
+        self.SetNFilesPerJob(1)
+        self.SetShortQueue(False)
 
     def SetRunDirectory(self,val):
         self.run_dir = val
+
+    def SetScriptDirectory(self,val):
+        self.script_directory = val
 
     def SetInputListFile(self,val):
         self.input_list_file = val
@@ -100,18 +106,9 @@ class CondorRunner:
                 output_name = '{}_job{}'.format(self.out_name,str(i).zfill(3))
 
                 # prepare the argument string.
-                arg_string = '{i} {da} {dd} {de} {s} {O} {o} {rng1} {rng2} {w}'
+                arg_string = '{i}'
                 arg_string = arg_string.format(
-                    i=input_list_filename,
-                    da=self.track_database_file_a,
-                    dd=self.track_database_file_d,
-                    de=self.track_database_file_e,
-                    O=self.out_dir,
-                    o=output_name,
-                    s=self.sig_region,
-                    rng1 = self.rng_seed_min,
-                    rng2 = self.rng_seed_max,
-                    w = self.mc_weighting_flag
+                    i=input_list_filename
                 )
                 f.write(arg_string + '\n')
         return
@@ -120,6 +117,8 @@ class CondorRunner:
         """
         Function for preparing condor jobs.
         """
+
+        self.input_list_file = input_list_filename # TODO: clean up
 
         # Create the output directory.
         if(self.out_dir is None):
@@ -132,7 +131,8 @@ class CondorRunner:
         # Gather the necessary files that will be packaged up and sent
         # to the job. NOTE: It is up to the job to unpack these!
         payload = 'payload.tar.gz'
-        command = ['tar','-czf',payload] + payload_contents
+        command = ['tar','-czf',payload] + ['-C',self.script_directory] + payload_contents
+        print('Running command: ',' '.join(command))
         sub.check_call(command)
 
         # make the directory from which the condor jobs will be run
