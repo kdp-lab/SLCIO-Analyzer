@@ -1,4 +1,8 @@
 
+# Arguments:
+inputFile=$1
+outputPath=$2
+
 # Step 1: Set up the environment.
 
 # The basic environment setup can be handled via CVMFS (for now).
@@ -18,10 +22,10 @@ tar -xzf payload.tar.gz
 # Step 3: run things!
 outputFile="output.root"
 python slcio_analyzer.py \
-  -i inputs.txt \
+  -i $inputFile \
   -n -1 \
   -m "ROOT" \
   -o $outputFile
 
 # Step 4: copy output to output directory
-
+cp $outputFile $outputPath

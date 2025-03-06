@@ -15,6 +15,14 @@ class CondorRunner:
         self.SetScriptDirectory(os.path.dirname(os.path.realpath(__file__)) + '/../../')
         self.SetNFilesPerJob(1)
         self.SetShortQueue(False)
+        self.mode='UCAF'
+        self.inputs = []
+
+    def SetInputs(self,val):
+        self.inputs = val
+
+    def SetMode(self,val):
+        self.mode = val
 
     def SetRunDirectory(self,val):
         self.run_dir = val
@@ -77,7 +85,11 @@ class CondorRunner:
                 blacklist= blacklist_file.readlines()
         blacklist = [x.strip().strip('\n') for x in blacklist]
         requirements = []
-        if(require_cvmfs): requirements.append("HAS_CVMFS =?= TRUE")
+        if(require_cvmfs):
+            if(self.mode=='UCAF'):
+                requirements.append("HAS_CVMFS =?= TRUE")
+            elif(self.mode=='OSG'):
+                requirements.append('HAS_CVMFS_unpacked_cern_ch') #'(HAS_SINGULARITY ) && ( HAS_CVMFS_unpacked_cern_ch'
         requirements += ["machine != \"{}\"".format(x) for x in blacklist]
         requirements = "(" + " && ".join(requirements) + ")"
         return requirements
@@ -96,19 +108,27 @@ class CondorRunner:
                 new_line = new_line.replace('$REQUIREMENTS',self._fetch_requirements())
                 new_line = new_line.replace('$NCPU',str(self.ncpu))
                 new_line = new_line.replace('$MEM',str(self.memory))
+                new_line = new_line.replace('$INPUTS',', '.join(self.inputs))
                 new_line = new_line.replace('$SHORT_QUEUE',short_queue)
                 f.write(new_line)
         return
 
-    def _write_arguments_file(self,arguments_file,njobs,input_list_filename):
+    def _write_arguments_file(self,arguments_file,njobs,input_list_filename, **kwargs):
+        """
+        This function will need to be customized if using this CondorRunner elsewhere,
+        this is where we actually write the file containing job arguments.
+        """
         with open('{}/{}'.format(self.run_dir,arguments_file),'w') as f:
             for i in range(njobs):
-                output_name = '{}_job{}'.format(self.out_name,str(i).zfill(3))
-
+                file_extension = self.out_name.split('.')[-1] # TODO: Fragile code?
+                filename_no_extension = self.out_name.split('.')[0]
+                output_name = '{}_job{}.{}'.format(filename_no_extension,str(i).zfill(3),file_extension)
+                output_path = '{}/{}'.format(kwargs['output_directory'],output_name)
                 # prepare the argument string.
-                arg_string = '{i}'
+                arg_string = '{i} {O}'
                 arg_string = arg_string.format(
-                    i=input_list_filename
+                    i=input_list_filename,
+                    O=output_path
                 )
                 f.write(arg_string + '\n')
         return
@@ -119,6 +139,7 @@ class CondorRunner:
         """
 
         self.input_list_file = input_list_filename # TODO: clean up
+
 
         # Create the output directory.
         if(self.out_dir is None):
@@ -132,7 +153,6 @@ class CondorRunner:
         # to the job. NOTE: It is up to the job to unpack these!
         payload = 'payload.tar.gz'
         command = ['tar','-czf',payload] + ['-C',self.script_directory] + payload_contents
-        print('Running command: ',' '.join(command))
         sub.check_call(command)
 
         # make the directory from which the condor jobs will be run
@@ -171,9 +191,10 @@ class CondorRunner:
         # the condor submission file, since we will keep all the arguments in one place for easy access.
         # Each job's output will have a unique name, since the condor jobs will send them all to the same output directory
         # and we want to avoid naming collisions.
-        self._write_arguments_file(arguments_file,njobs,input_list_filename)
+        self._write_arguments_file(arguments_file,njobs,input_list_filename,output_directory=self.out_dir)
 
         # Fetch the condor submission template, and fill it in appropriately.
+        self.SetInputs([input_list_filename,'../{}'.format(payload)]) # payload is one directory up, since initialdir will be the individual job dirs
         self._create_submision_file(condor_template)
 
         # Fetch the condor executable.

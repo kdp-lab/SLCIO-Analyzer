@@ -150,6 +150,7 @@ class Processor():
         reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
         reader.setReadCollectionNames(branch_list)
 
+        print(self.fnames,self.max_events) # DEBUG
         num_events_total = GetNumEventsTotal(self.fnames,self.max_events)
         print('Looping over {} events.'.format(num_events_total))
 
@@ -583,10 +584,10 @@ def main(args):
         condor_runner.SetScriptDirectory(this_dir) # useful specifically for things like the tar command it runs
         condor_runner.SetRunDirectory(run_dir)
         condor_runner.SetOutputDirectory(output_dir)
-        condor_runner.SetOutputName(output_filename.split('.')[-2])
+        condor_runner.SetOutputName(output_filename)
         condor_runner.SetBatchName('SLCIO-Analyzer')
+        condor_runner.SetMode('OSG')
         condor_runner.run(template,executable,payload_contents,args['inputFile'],arguments_file)
-
 
     else:
         # Running locally.

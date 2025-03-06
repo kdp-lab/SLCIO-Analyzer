@@ -10,7 +10,7 @@ arguments               = "$(unique_args)"
 initialdir              = job$(Process)
 should_transfer_files   = IF_NEEDED
 when_to_transfer_output = ON_EXIT
-transfer_input_files    = ../payload.tar.gz, inputs.txt
+transfer_input_files    = $INPUTS
 transfer_output_files   = ""
 log                     = job.log
 error                   = job.err
@@ -19,4 +19,5 @@ requirements            = $REQUIREMENTS
 RequestCpus             = $NCPU
 RequestMemory           = $MEM
 $SHORT_QUEUE
++ProjectName="collab.futurecolliders"
 queue unique_args from arguments.txt
