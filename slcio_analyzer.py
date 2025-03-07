@@ -150,7 +150,6 @@ class Processor():
         reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
         reader.setReadCollectionNames(branch_list)
 
-        print(self.fnames,self.max_events) # DEBUG
         num_events_total = GetNumEventsTotal(self.fnames,self.max_events)
         print('Looping over {} events.'.format(num_events_total))
 
@@ -165,7 +164,7 @@ class Processor():
 
                 # Events are typically quite large, so it is OK to print for each one:
                 # this is probably not going to be what slows down the code.
-                print('Processing event {}/{}'.format(i+1,num_events_total))
+                print('Processing event {}/{}'.format(event_counter,num_events_total))
 
                 # Get the collections we care about
                 relation_collection = event.getCollection(relation_collection_name)
