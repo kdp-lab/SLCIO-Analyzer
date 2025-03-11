@@ -5,84 +5,34 @@ import sys,os
 import pyLCIO
 import ROOT as rt
 import argparse as ap
+import numpy as np
 
 import utils.qol_utils.progress_bar as pb
 from utils.writers import writers
 from utils.track import Track
-from utils.misc import GetFourVector, GetNumEventsTotal, ParseInputFiles
+from utils.misc import GetFourVector, GetNumEventsTotal, ParseInputFiles, CheckHardRadiation, FillKinematicDict, FillResolutionDict, NHitsPerLayer
 from utils.condor.condor import CondorRunner
 
-def check_hard_radiation(mcp, fractional_threshold):
-    had_hard_rad = False
-    daughters = mcp.getDaughters()
-    for d in daughters:
-        if(d.getPDG() in [22,23,24]):
-            if(d.getEnergy() > fractional_threshold*mcp.getEnergy()):
-                had_hard_rad = True
-                break
-    return had_hard_rad
-
-def FillKinematicDict(obj,d):
+def CreateQueueList(input_data_list_file,version):
     """
-    Fills a dictionary with some kinematic quantities from obj.
+    Another function that will need to be customized to port this CondorRunner elsewhere.
+    This function creates the lists containing values of variables to be queued over if using
+    the "queue" mode where lists of values are written to the "queue" command at the bottom of
+    the condor submission script. The details of this will naturally be highly dependent on the
+    nature of your submission script and how the jobs are set up.
     """
-    vec = GetFourVector(obj)
+    queue_lists = []
 
-    if('pt' in d.keys()):
-        d['pt'].append(vec.Pt())
-    if('eta' in d.keys()):
-        d['eta'].append(vec.Eta())
-    if('phi' in d.keys()):
-        d['phi'].append(vec.Phi())
-    if('theta' in d.keys()):
-        d['theta'].append(vec.Theta())
+    with open(input_data_list_file,'r') as f:
+        data_list = f.readlines()
+        data_list = [x.strip().replace('\n','') for x in data_list]
+    queue_lists.append(data_list)
 
-    # Now some optional track stuff
-    if(type(obj) == Track):
-        if('d0' in d.keys()):
-            d['d0'].append(obj.GetD0())
-        if('z0' in d.keys()):
-            d['z0'].append(obj.GetZ0())
-        if('chi2' in d.keys()):
-            d['chi2'].append(obj.GetChi2())
-        if('ndf' in d.keys()):
-            d['ndf'].append(obj.GetNDF())
-        if('nhits' in d.keys()):
-            d['nhits'].append(obj.GetNHits())
+    data_list_local = [x.split('/')[-1] for x in data_list]
+    args_list = ['{} {}'.format(x,version) for x in data_list_local]
+    queue_lists.append(args_list)
+    return queue_lists
 
-    return # no need to return anything, d has been changed (keep in mind how dictionaries are handled in Python!)
-
-def NHitsPerLayer(track,hit_collection):
-    LC_pixel_nhit = 0
-    LC_inner_nhit = 0
-    LC_outer_nhit = 0
-    for hit in track.getTrackerHits():
-    # now decode hits, if available
-        encoding = hit_collection.getParameters().getStringVal(pyLCIO.EVENT.LCIO.CellIDEncoding)
-        decoder = pyLCIO.UTIL.BitField64(encoding)
-        cellID = int(hit.getCellID0())
-        decoder.setValue(cellID)
-        detector = decoder["system"].value()
-        if detector in [1,2]:
-            LC_pixel_nhit += 1
-        if detector in [3,4]:
-            LC_inner_nhit += 1
-        if detector in [5,6]:
-            LC_outer_nhit += 1
-    return [LC_pixel_nhit,LC_inner_nhit,LC_outer_nhit]
-
-def FillResolutionDict(muon, track, d):
-    muon_vec = GetFourVector(muon)
-    ptres = (muon_vec.Pt() - track.GetVector().Pt()) / muon_vec.Pt()
-    d['ptres'].append(ptres)
-    d['d0res_pt'].append([muon_vec.Pt(), track.GetD0()])
-    d['d0res_eta'].append([muon_vec.Eta(), track.GetD0()])
-    d['z0res_pt'].append([muon_vec.Pt(), track.GetZ0()])
-    d['z0res_eta'].append([muon_vec.Eta(), track.GetZ0()])
-    d['ptres_pt'].append([muon_vec.Pt(), ptres])
-    d['ptres_eta'].append([muon_vec.Eta(), ptres])
-
-    return
 
 class Processor():
     """
@@ -106,6 +56,10 @@ class Processor():
         self.mode = mode
 
         self.writer = None
+        self.version=2
+
+    def SetVersion(self,val):
+        self.version = val
 
     def SetWriter(self):
         if(self.mode=='json'):
@@ -113,7 +67,6 @@ class Processor():
         else:
             self.writer = writers.RootWriter(output_file=self.output_filename)
         return
-
 
     def Run(self):
         self.SetWriter()
@@ -123,16 +76,24 @@ class Processor():
         num_dupes = 0
         num_fake_tracks = 0
 
-        collection_names = [
-            "MCParticle",
-            # "PandoraPFOs", # NOTE: Not present! Will keep relevant code/comments for now.
-            'AllTracks',
-            "SiTracks", # Note: Causes crash if AllTracks is not loaded too -- this basically holds pointers to AllTracks collection.
-            # "SeedTracks",
-            # "SiTracks_Refitted", # NOTE: Not present!
-            "MCParticle_SiTracks",
-            # "MCParticle_SiTracks_Refitted",
-        ]
+        if(self.version == 1):
+            collection_names = [
+                "MCParticle",
+                # "PandoraPFOs", # NOTE: Not present in v1! Will keep relevant code/comments for now.
+                'AllTracks',
+                "SiTracks", # Note: Causes crash if AllTracks is not loaded too -- this basically holds pointers to AllTracks collection.
+                # "SeedTracks",
+                # "SiTracks_Refitted", # NOTE: Not present!
+                "MCParticle_SiTracks",
+                # "MCParticle_SiTracks_Refitted",
+            ]
+        else: # for v2 specifically
+            collection_names = [
+                "MCParticle",
+                "PandoraPFOs",
+                "SiTracks", # Note: Causes crash if AllTracks is not loaded too -- this basically holds pointers to AllTracks collection.
+                "MCParticle_SiTracks",
+            ]
 
         track_collection_name = 'SiTracks' # TODO: eventually make this toggleable
         relation_collection_name = 'MCParticle_{}'.format(track_collection_name)
@@ -140,15 +101,28 @@ class Processor():
         assert(relation_collection_name in collection_names)
 
         # Treat the hit collections separately -- these might not be present.
-        hit_collection_names = [
-            "VBTrackerHitsConed",
-            "VETrackerHitsConed"
-        ]
-        hit_collection_mask = {key:True for key in hit_collection_names} # TODO: Not sure if this works as intended? -Jan
+        if(self.version == 1):
+            hit_collection_names = [
+                "IBTrackerHitsConed",
+                "IETrackerHitsConed",
+                "OBTrackerHitsConed",
+                "OETrackerHitsConed",
+                "VBTrackerHitsConed",
+                "VETrackerHitsConed"
+            ]
+        else:
+            hit_collection_names = [
+                "VBTrackerHitsConed",
+                "VETrackerHitsConed"
+            ]
 
+        hit_collection_mask = {key:True for key in hit_collection_names} # TODO: Not sure if this works as intended? -Jan
         branch_list = collection_names + hit_collection_names
         reader = pyLCIO.IOIMPL.LCFactory.getInstance().createLCReader()
         reader.setReadCollectionNames(branch_list)
+
+        event_print_chunk = 100
+        if(self.verbose): event_print_chunk = 1
 
         num_events_total = GetNumEventsTotal(self.fnames,self.max_events)
         print('Looping over {} events.'.format(num_events_total))
@@ -156,7 +130,7 @@ class Processor():
         # ############## LOOP OVER EVENTS AND FILL HISTOGRAMS  #############################
         # Loop over events
         for f in self.fnames:
-            if self.max_events > 0 and event_counter >= self.max_events: break
+            if self.max_events > 0 and event_counter >= self.max_events: break # a bit clunky but there's an edge case where this avoids an extra read, I think? - Jan
 
             reader.open(f)
             for i,event in enumerate(reader):
@@ -164,7 +138,8 @@ class Processor():
 
                 # Events are typically quite large, so it is OK to print for each one:
                 # this is probably not going to be what slows down the code.
-                print('Processing event {}/{}'.format(event_counter,num_events_total))
+                if(event_counter%event_print_chunk == 0 or (event_counter==num_events_total-1)):
+                    print('Processing event {}/{}'.format(event_counter+1,num_events_total))
 
                 # Get the collections we care about
                 relation_collection = event.getCollection(relation_collection_name)
@@ -341,19 +316,22 @@ class Processor():
 
                 ##################################################################
                 # Loop over the truth objects and fill histograms
+                if(self.verbose):
+                    print('Looping over {} MCPs.'.format(len(mcp_collection)))
                 for j,mcp in enumerate(mcp_collection):
-                    pb.printProgressBar(
-                        j,
-                        len(mcp_collection),
-                        prefix='\tMCPs',
-                        suffix='Complete'
-                    )
+                    if(self.verbose):
+                        pb.printProgressBar(
+                            j,
+                            len(mcp_collection),
+                            prefix='\tMCPs',
+                            suffix='Complete'
+                        )
                     FillKinematicDict(mcp,mcp_dict)
 
                     if(abs(mcp.getPDG())==13 and mcp.getGeneratorStatus()==1):
 
                         # Check if the muon radiated significant energy
-                        hard_rad = check_hard_radiation(mcp, self.fractional_threshold)
+                        hard_rad = CheckHardRadiation(mcp, self.fractional_threshold)
 
                         FillKinematicDict(mcp,mcp_mu_dict)
                         mcp_muon_index = j
@@ -381,7 +359,13 @@ class Processor():
                                     lc_matched_track_dict['dr'].append(dr)
 
                                     if(len(hit_collections) > 0):
-                                        LC_pixel_nhit, LC_inner_nhit, LC_outer_nhit = NHitsPerLayer(track,hit_collections[0])
+                                        LC_pixel_nhit = -1
+                                        LC_inner_nhit = -1
+                                        LC_outer_nhit = -1
+                                        try:
+                                            LC_pixel_nhit, LC_inner_nhit, LC_outer_nhit = NHitsPerLayer(track,hit_collections[0])
+                                        except:
+                                            pass
                                         lc_matched_track_dict['pixel_nhit'].append([LC_pixel_nhit])
                                         lc_matched_track_dict['inner_nhit'].append([LC_inner_nhit])
                                         lc_matched_track_dict['outer_nhit'].append([LC_outer_nhit])
@@ -415,14 +399,15 @@ class Processor():
                             #     d_mu_dict['pt_relpt'].append([mcp_vec.Pt(), (pfo_mu_vec.Pt() - mcp_vec.Pt())/mcp_vec.Pt()])
                 ##################################################################
 
-                pb.printProgressBar(
-                    len(mcp_collection),
-                    len(mcp_collection),
-                    prefix='\tMCPs',
-                    suffix='Complete'
-                )
-                if(n_mcp_mu > 1):
-                    print('\tWarning: Found {} truth-level muons in event! Skipping...'.format(n_mcp_mu))
+                if(self.verbose):
+                    pb.printProgressBar(
+                        len(mcp_collection),
+                        len(mcp_collection),
+                        prefix='\tMCPs',
+                        suffix='Complete'
+                    )
+                    if(n_mcp_mu > 1):
+                        print('\tWarning: Found {} truth-level muons in event! Skipping...'.format(n_mcp_mu))
 
                 ##################################################################
                 # Loop over the track objects and fill histograms for D0, Z0, and hit counts
@@ -431,15 +416,17 @@ class Processor():
                 max_hits = 0
                 best_track = None
 
-                track_print_chunk = int(len(track_collection) / 200)
+                track_print_chunk = np.maximum(int(len(track_collection) / 200),1)
                 progress_bar = pb.ProgressBar(
                         prefix='\tTracks',
                         suffix='Complete'
                 )
 
+                if(self.verbose):
+                    print('Looping over {} tracks.'.format(len(track_collection)))
                 for j,track in enumerate(track_collection):
 
-                    if(j%track_print_chunk==0):
+                    if(j%track_print_chunk==0 and self.verbose):
                         progress_bar.Print(j,len(track_collection))
 
                     track_container = Track(track,self.Bfield)
@@ -454,11 +441,14 @@ class Processor():
                         # has_fake_tracks = True
                         FillKinematicDict(track_container,fake_track_dict)
 
-                        fake_pixel_nhit = 0
-                        fake_inner_nhit = 0
-                        fake_outer_nhit = 0
+                        fake_pixel_nhit = -1
+                        fake_inner_nhit = -1
+                        fake_outer_nhit = -1
                         if(len(hit_collections) > 0):
-                            fake_pixel_nhit, fake_inner_nhit, fake_outer_nhit = NHitsPerLayer(track,hit_collections[0])
+                            try:
+                                fake_pixel_nhit, fake_inner_nhit, fake_outer_nhit = NHitsPerLayer(track,hit_collections[0])
+                            except:
+                                pass
                             fake_track_dict['pixel_nhit'].append(fake_pixel_nhit)
                             fake_track_dict['inner_nhit'].append(fake_inner_nhit)
                             fake_track_dict['outer_nhit'].append(fake_outer_nhit)
@@ -494,13 +484,18 @@ class Processor():
                     # pixel_nhit, inner_nhit, outer_nhit = NHitsPerLayer(track,hit_collections[0])
 
                 ##################################################################
-                progress_bar.Print(len(track_collection),len(track_collection))
+                if(self.verbose):
+                    try:
+                        progress_bar.Print(len(track_collection),len(track_collection))
+                    except:
+                        print('\t(no tracks in track collection)')
 
-                if n_pfo_mu > 1:
+                if((n_pfo_mu > 1) and self.verbose):
                     print('\tWarning: Found {} reconstructed muons.'.format(n_pfo_mu))
 
                 # Now fill a bunch of things.
-                print('\t\tFilling.')
+                if(self.verbose):
+                    print('\t\tFilling.')
 
                 for key,val in mcp_dict.items():
                     self.writer.Append('mcp_{}'.format(key),val)
@@ -526,7 +521,7 @@ class Processor():
                 for key,val in fake_track_dict.items():
                     self.writer.Append('fake_track_{}'.format(key),val)
 
-                if(self.mode != 'json'):
+                if(self.mode != 'json'): # for ROOT writer, flush buffers to tree!
                     self.writer.FlushBuffersToTree()
 
                 event_counter += 1
@@ -543,10 +538,12 @@ def main(args):
     parser.add_argument('-o','--outputFile',type=str,default='slcio_analyser.json')
     parser.add_argument('-m','--mode',type=str,default='JSON')
     parser.add_argument('-c','--condor',type=int,default=0, help='If >0, creates jobs for condor instead of running locally.')
+    parser.add_argument('-version','--version',type=int,default=2)
 
     # Some condor-specific args
     parser.add_argument('-r','--runDir',type=str,default='run', help='Run directory for jobs. [condor only]')
     parser.add_argument('-O','--outputDir',type=str,default=None, help='Output directory for jobs. [condor only]')
+    parser.add_argument('-b','--batchName',type=str,default='SLCIO-Analyzer')
 
     args = vars(parser.parse_args())
 
@@ -556,13 +553,14 @@ def main(args):
     output_filename = args['outputFile']
     mode = args['mode'].lower()
     use_condor = args['condor'] > 0
+    version = args['version']
 
+    batch_name = args['batchName']
     run_dir = args['runDir']
     output_dir = args['outputDir']
 
     if(use_condor):
-
-        assert(output_dir is not None)
+        # assert(output_dir is not None)
 
         # Creating condor jobs.
         condor_runner = CondorRunner()
@@ -584,13 +582,33 @@ def main(args):
         condor_runner.SetRunDirectory(run_dir)
         condor_runner.SetOutputDirectory(output_dir)
         condor_runner.SetOutputName(output_filename)
-        condor_runner.SetBatchName('SLCIO-Analyzer')
+        condor_runner.SetBatchName(batch_name)
         condor_runner.SetMode('OSG')
-        condor_runner.run(template,executable,payload_contents,args['inputFile'],arguments_file)
+        condor_runner.SetMemory(2048)
+        condor_runner.SetInputListFile(args['inputFile'])
+        condor_runner.SetPayload(run_dir + '/payload.tar.gz')
+
+        # NOTE: Currently using "queue" mode, which writes a pretty long submission script for condor.
+        #       Instead of queueing arguments from a plaintext file, we explicitly write them within the
+        #       submission script. The advantage is that we can *also* simultaneously queue other arguments,
+        #       in this case the data files for input as we'll be sending them over condor file transfer.
+        #       Note that this is a bit fragile in that we have to be careful about specifying inputs here.
+        condor_runner.SetStyle("queue") # "arguments" will write an arguments_file, other args will default to "queue" mode
+        condor_runner.SetInputs(['$(input)']) # these are input files, for file transfer. Payload added automatically by default
+        condor_runner.SetQueueVars(['input','unique_args'])
+        condor_runner.SetQueueLists(CreateQueueList(args['inputFile'],version))
+
+        condor_runner.run(
+            template,
+            executable,
+            payload_contents,
+            arguments_file=arguments_file
+        )
 
     else:
         # Running locally.
         processor = Processor(fnames,max_events,verbose,output_filename,mode)
+        processor.SetVersion(version)
         processor.Run()
     return
 

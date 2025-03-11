@@ -3,7 +3,8 @@
 # HTCondor submit description file
 #
 ####################
-
+Universe                = Vanilla
++SingularityImage       = "/cvmfs/unpacked.cern.ch/gitlab-registry.cern.ch/muon-collider/mucoll-deploy/mucoll:2.9-alma9"
 batch_name              = $BATCH_NAME
 executable              = condor_job.sh
 arguments               = "$(unique_args)"
@@ -11,13 +12,13 @@ initialdir              = job$(Process)
 should_transfer_files   = IF_NEEDED
 when_to_transfer_output = ON_EXIT
 transfer_input_files    = $INPUTS
-transfer_output_files   = ""
+transfer_output_files   = output.root
 log                     = job.log
 error                   = job.err
 output                  = job.out
-requirements            = $REQUIREMENTS
+requirements            = ( HAS_SINGULARITY ) && ( $REQUIREMENTS )
 RequestCpus             = $NCPU
 RequestMemory           = $MEM
 $SHORT_QUEUE
 +ProjectName="collab.futurecolliders"
-queue unique_args from arguments.txt
+$QUEUE

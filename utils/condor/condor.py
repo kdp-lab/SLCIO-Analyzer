@@ -7,7 +7,7 @@ class CondorRunner:
     Class based on some ATLAS work I did
     for the 2024 DV+MET analysis. -Jan T. Offermann
     """
-    def __init__(self):
+    def __init__(self,style='arguments'):
         self.run_dir = 'run'
         self.ncpu = 1
         self.memory = 4096 # MiB
@@ -17,21 +17,41 @@ class CondorRunner:
         self.SetShortQueue(False)
         self.mode='UCAF'
         self.inputs = []
+        self.payload = '../payload.tar.gz' # name for tar containing input script and libraries - by default it sits one directory up from the initialdir
+        self.SetStyle(style)
 
-    def SetInputs(self,val):
+        # stuff related to "queue" mode
+        self.queue_vars = None
+        self.queue_lists = None
+        self.queue_string = None
+
+    def SetPayload(self,val):
+        self.payload = val
+
+    def SetInputs(self,val,append_payload=True):
         self.inputs = val
+        if(append_payload):
+            self.inputs += [self.payload]
 
     def SetMode(self,val):
         self.mode = val
 
+    def SetQueueVars(self,val):
+        self.queue_vars = val
+
+    def SetQueueLists(self,val):
+        self.queue_lists = val
+
     def SetRunDirectory(self,val):
         self.run_dir = val
+
+
 
     def SetScriptDirectory(self,val):
         self.script_directory = val
 
     def SetInputListFile(self,val):
-        self.input_list_file = val
+        self.input_data_list_file = val
 
     def SetNFilesPerJob(self,val):
         self.nfiles_per_job = val
@@ -94,6 +114,20 @@ class CondorRunner:
         requirements = "(" + " && ".join(requirements) + ")"
         return requirements
 
+    def SetStyle(self,style):
+        """
+        This function determines how the condor job handles arguments:
+        are they provided in an explicit arguments file from which condor
+        queues jobs, or are they explicitly listed within the condor submission
+        script? The latter is a bit clunky but allows for some advanced behaviour,
+        such as queueing command-line arguments as well as file inputs for the
+        condor transfer protocol (which is useful if the workers cannot access
+        the filesystem where the input data lives).
+        """
+        self.style = style
+        if(self.style == 'queue'):
+            assert(self.nfiles_per_job == 1) # will break otherwise
+
     def _create_submision_file(self,template):
 
         with open(template,'r') as f:
@@ -109,7 +143,12 @@ class CondorRunner:
                 new_line = new_line.replace('$NCPU',str(self.ncpu))
                 new_line = new_line.replace('$MEM',str(self.memory))
                 new_line = new_line.replace('$INPUTS',', '.join(self.inputs))
+
+                # The short queue is something UCAF-specific
                 new_line = new_line.replace('$SHORT_QUEUE',short_queue)
+
+                if(self.style != 'arguments'):
+                    new_line = new_line.replace('$QUEUE',self.queue_string)
                 f.write(new_line)
         return
 
@@ -133,42 +172,54 @@ class CondorRunner:
                 f.write(arg_string + '\n')
         return
 
-    def run(self,condor_template, condor_executable, payload_contents, input_list_filename='inputs.txt',arguments_file='arguments.txt'):
+    def _create_queue_string(self,vars,lists):
+        queue_string = 'queue ' + ', '.join(vars) + ' from (\n'
+        # a bit hacky, assuming lists is a list of lists.
+        # e.g. [[1,2],['a','b']] where we want values then queued as
+        # 1 a
+        # 2 b
+        #
+        l = len(lists[0])
+        for i in range(l):
+            queue_string +=  ', '.join([x[i] for x in lists]) + '\n'
+        queue_string += ')'
+        self.queue_string = queue_string
+
+    def run(self,condor_template, condor_executable, payload_contents,**kwargs):
         """
         Function for preparing condor jobs.
         """
 
-        self.input_list_file = input_list_filename # TODO: clean up
-
-
         # Create the output directory.
-        if(self.out_dir is None):
-            raise ValueError("CondorRunner: Output directory is not set.")
-        os.makedirs(self.out_dir,exist_ok=True)
+        if(self.style=='arguments'):
+            if(self.out_dir is None):
+                raise ValueError("CondorRunner: Using \'arguments\' job creation method, but output directory is not set.")
+            os.makedirs(self.out_dir,exist_ok=True)
 
         # Get directory that this script is sitting inside.
         # this_dir = os.path.dirname(os.path.abspath(__file__))
 
-        # Gather the necessary files that will be packaged up and sent
-        # to the job. NOTE: It is up to the job to unpack these!
-        payload = 'payload.tar.gz'
-        command = ['tar','-czf',payload] + ['-C',self.script_directory] + payload_contents
-        sub.check_call(command)
-
         # make the directory from which the condor jobs will be run
-        # self.run_dir = 'run'
         os.makedirs(self.run_dir)
 
-        # move payload to the run directory
-        command = ['mv',payload,self.run_dir]
+        # Gather the necessary files that will be packaged up and sent
+        # to the job. NOTE: It is up to the job to unpack these!
+        command = ['tar','-czf',self.payload] + ['-C',self.script_directory] + payload_contents
         sub.check_call(command)
 
-        # copy the original input_list_file into the run directory -- it will be split up for the jobs
-        command = ['cp',self.input_list_file,self.run_dir]
+        # move self.payload to the run directory
+        try:
+            command = ['mv',self.payload,self.run_dir]
+            sub.check_call(command)
+        except:
+            pass
+
+        # copy the original input_data_list_file into the run directory -- it will be split up for the jobs
+        command = ['cp',self.input_data_list_file,self.run_dir]
         sub.check_call(command)
 
-        # parse the input_list_file, determine number of jobs and files for each job
-        with open(self.input_list_file,'r') as f:
+        # parse the input_data_list_file, determine number of jobs and files for each job
+        with open(self.input_data_list_file,'r') as f:
             input_files = f.readlines()
         nfiles = len(input_files)
 
@@ -182,19 +233,26 @@ class CondorRunner:
 
             job_dir = 'job{}'.format(i)
             os.makedirs('{}/{}'.format(self.run_dir,job_dir))
-            input_list_file_mini = '{}/{}/{}'.format(self.run_dir,job_dir,input_list_filename)
+            input_list_file_mini = '{}/{}/{}'.format(self.run_dir,job_dir,self.input_data_list_file.split('/')[-1])
             with open(input_list_file_mini,'w') as f:
                 for entry in files:
                     f.write(entry)
 
-        # Make a file containing the arguments for the jobs. I find this easier to do than writing things in
-        # the condor submission file, since we will keep all the arguments in one place for easy access.
-        # Each job's output will have a unique name, since the condor jobs will send them all to the same output directory
-        # and we want to avoid naming collisions.
-        self._write_arguments_file(arguments_file,njobs,input_list_filename,output_directory=self.out_dir)
+        if(self.style == 'arguments'):
+            # Make a file containing the arguments for the jobs. I find this easier to do than writing things in
+            # the condor submission file, since we will keep all the arguments in one place for easy access.
+            # Each job's output will have a unique name, since the condor jobs will send them all to the same output directory
+            # and we want to avoid naming collisions.
+
+            self._write_arguments_file(kwargs['arguments_file'],njobs,self.input_data_list_file,output_directory=self.out_dir)
+            # self.SetInputs([self.input_data_list_file]) # self.payload is one directory up, since initialdir will be the individual job dirs
+
+        else:
+            # create the queue string, that will be written into the submission file
+            # self._create_queue_lists()
+            self._create_queue_string(self.queue_vars,self.queue_lists)
 
         # Fetch the condor submission template, and fill it in appropriately.
-        self.SetInputs([input_list_filename,'../{}'.format(payload)]) # payload is one directory up, since initialdir will be the individual job dirs
         self._create_submision_file(condor_template)
 
         # Fetch the condor executable.
