@@ -15,9 +15,12 @@ class JsonWriter():
         self.output_filename = output_file
         self.data_dict = {}
 
+    def CreateBuffer(self,key):
+        self.data_dict[key] = []
+
     def Append(self,key,val):
         if(key not in self.data_dict.keys()):
-            self.data_dict[key] = []
+            self.CreateBuffer(key)
         self.data_dict[key].append(val)
 
     def Write(self):
@@ -45,7 +48,7 @@ class RootWriter():
         self.root_file = rt.TFile(output_file,'RECREATE') # will overwrite output file if it exists
         self.tree = rt.TTree(self.tree_name,self.tree_name)
 
-    def CreateBuffer(self,key,val):
+    def CreateBuffer(self,key,val,datatype=None):
         if(type(val) == int):
             self.data_dict[key] = np.zeros(1,dtype=int)
             self.tree.Branch(key,self.data_dict[key],'{}/I'.format(key))
@@ -53,22 +56,33 @@ class RootWriter():
             self.data_dict[key] = np.zeros(1,dtype=float)
             self.tree.Branch(key,self.data_dict[key],'{}/D'.format(key))
         elif(type(val) in (list,np.ndarray)): # assume a vector -- will be a bit hacky, admittedly!
-            if(len(val) == 0): # skip this -- hacky but should work OK
-                return
+            if(len(val) == 0): # TODO: Dangerous case -- don't want to skip since this'll cause issues if this *never* gets filled, and we hadd with another tree where it was...
+                if(datatype is None): # will allow user to explicitly state the data type
+                # NOTE: will try to infer the data type based on the key name. This is pretty hacky!
+                    if(('pt' in key) or ('eta' in key) or ('phi' in key) or ('theta' in key) or ('d0' in key) or ('z0' in key) or ('res' in key) or ('chi2' in key)):
+                        datatype = 'double'
+                    elif(('nhit' in key) or ('ndf' in key)):
+                        datatype='int'
+
+                if(datatype is not None):
+                    self.data_dict[key] = rt.std.vector(datatype)()
+                    self.tree.Branch(key,self.data_dict[key])
+                else:
+                    raise ValueError("Error in RootWriter.CreateBuffer: Created with empty list for key {}, but type cannot be inferred.".format(key))
+
             elif(type(val[0]) == int):
                 self.data_dict[key] = rt.std.vector('int')()
                 self.tree.Branch(key,self.data_dict[key])
             elif(type(val[0]) == float):
-                self.data_dict[key] = rt.std.vector('double')() # NOTE: double vs float?
+                self.data_dict[key] = rt.std.vector('double')() # NOTE: double vs float? Need to be consistent throughout
                 self.tree.Branch(key,self.data_dict[key])
             elif(type(val[0]) == list): # getting a bit complicated!
                 if(len(val[0]) == 2 and type(val[0][0] == float) and type(val[0][1] == float)):
-                    self.data_dict[key] = rt.std.vector(rt.std.vector('double'))() # NOTE: double vs float?
+                    self.data_dict[key] = rt.std.vector(rt.std.vector('double'))()
                     self.tree.Branch(key,self.data_dict[key])
                 else:
                     raise ValueError('Error in RootWriter.CreateBuffer: Identified 2D list/array, but unable to identify its type.')
             else:
-                # print(key,val)
                 raise ValueError('Error in RootWriter.CreateBuffer: Identified list/array, but unable to identify its type.')
         else:
             raise ValueError('Error in RootWriter.CreateBuffer: Unable to identify buffer type.')
