@@ -373,8 +373,8 @@ class Processor():
                                     lc_matched_track_dict['outer_nhit'].append(LC_outer_nhit)
 
                                 num_matched_tracks += 1
-                                if hard_rad: # TODO: Not sure this is correct? Doesn't look like anything is being discarded. -Jan
-                                    hard_rad_discard += 1
+                                # if hard_rad: # TODO: Not sure this is correct? Doesn't look like anything is being discarded. -Jan
+                                #     hard_rad_discard += 1
                             # except:
                             #     pass
 
