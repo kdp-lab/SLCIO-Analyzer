@@ -260,6 +260,7 @@ class Processor():
                     'chi2':[],
                     'nhits':[],
                     'ptres':[],
+                    'dr':[],
                     'pixel_nhit':[],
                     'inner_nhit':[],
                     'outer_nhit':[]
@@ -342,39 +343,40 @@ class Processor():
 
                             # TODO: Looping over "tracks" sometimes causes issues, elements are then reported as being of parent class LCObject. Could this correspond w/ empty list?
                             tracks = relation.getRelatedToObjects(mcp)
-                            try: # to deal with the above-mentioned issue
-                                for k,track in enumerate(tracks):
+                            # try: # to deal with the above-mentioned issue
+                            # TODO: "for track in tracks" does not work! weird pointer stuff in pyLCIO
+                            for k in range(len(tracks)):
+                                track = tracks[k]
+                                track_container = Track(track,self.Bfield)
 
-                                    track_container = Track(track,self.Bfield)
+                                track_vec = track_container.GetVector()
+                                dr = rt.Math.VectorUtil.DeltaR(track_vec,mcp_vec)
+                                ptres = (mcp_vec.Pt() - track_vec.Pt()) / mcp_vec.Pt()
 
-                                    track_vec = track_container.GetVector()
-                                    dr = rt.Math.VectorUtil.DeltaR(track_vec,mcp_vec)
-                                    ptres = (mcp_vec.Pt() - track_vec.Pt()) / mcp_vec.Pt()
+                                FillKinematicDict(track_container,lc_matched_track_dict)
+                                FillKinematicDict(mcp,lc_matched_mcp_dict)
 
-                                    FillKinematicDict(track_container,lc_matched_track_dict)
-                                    FillKinematicDict(mcp,lc_matched_mcp_dict)
+                                # Fill some extra things
+                                lc_matched_track_dict['ptres'].append(ptres)
+                                lc_matched_track_dict['dr'].append(dr)
 
-                                    # Fill some extra things
-                                    lc_matched_track_dict['ptres'].append(ptres)
-                                    lc_matched_track_dict['dr'].append(dr)
+                                if(len(hit_collections) > 0):
+                                    LC_pixel_nhit = -1
+                                    LC_inner_nhit = -1
+                                    LC_outer_nhit = -1
+                                    try:
+                                        LC_pixel_nhit, LC_inner_nhit, LC_outer_nhit = NHitsPerLayer(track,hit_collections[0])
+                                    except:
+                                        pass
+                                    lc_matched_track_dict['pixel_nhit'].append(LC_pixel_nhit)
+                                    lc_matched_track_dict['inner_nhit'].append(LC_inner_nhit)
+                                    lc_matched_track_dict['outer_nhit'].append(LC_outer_nhit)
 
-                                    if(len(hit_collections) > 0):
-                                        LC_pixel_nhit = -1
-                                        LC_inner_nhit = -1
-                                        LC_outer_nhit = -1
-                                        try:
-                                            LC_pixel_nhit, LC_inner_nhit, LC_outer_nhit = NHitsPerLayer(track,hit_collections[0])
-                                        except:
-                                            pass
-                                        lc_matched_track_dict['pixel_nhit'].append([LC_pixel_nhit])
-                                        lc_matched_track_dict['inner_nhit'].append([LC_inner_nhit])
-                                        lc_matched_track_dict['outer_nhit'].append([LC_outer_nhit])
-
-                                    num_matched_tracks += 1
-                                    if hard_rad: # TODO: Not sure this is correct? Doesn't look like anything is being discarded. -Jan
-                                        hard_rad_discard += 1
-                            except:
-                                pass
+                                num_matched_tracks += 1
+                                if hard_rad: # TODO: Not sure this is correct? Doesn't look like anything is being discarded. -Jan
+                                    hard_rad_discard += 1
+                            # except:
+                            #     pass
 
                             # For events in which a PFO mu was reconstructed, fill histograms that will
                             # be used for efficiency. Both numerator and denominator must be filled with truth values!

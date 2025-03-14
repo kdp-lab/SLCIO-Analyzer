@@ -68,7 +68,7 @@ class RootWriter():
                     self.data_dict[key] = rt.std.vector(datatype)()
                     self.tree.Branch(key,self.data_dict[key])
                 else:
-                    raise ValueError("Error in RootWriter.CreateBuffer: Created with empty list for key {}, but type cannot be inferred.".format(key))
+                    raise ValueError("Error in RootWriter.CreateBuffer: Created with empty list, but type cannot be inferred. Key = {}".format(key))
 
             elif(type(val[0]) == int):
                 self.data_dict[key] = rt.std.vector('int')()
@@ -81,11 +81,11 @@ class RootWriter():
                     self.data_dict[key] = rt.std.vector(rt.std.vector('double'))()
                     self.tree.Branch(key,self.data_dict[key])
                 else:
-                    raise ValueError('Error in RootWriter.CreateBuffer: Identified 2D list/array, but unable to identify its type.')
+                    raise ValueError('Error in RootWriter.CreateBuffer: Identified 2D list/array, but unable to identify its type. Key = {}'.format(key))
             else:
-                raise ValueError('Error in RootWriter.CreateBuffer: Identified list/array, but unable to identify its type.')
+                raise ValueError('Error in RootWriter.CreateBuffer: Identified list/array, but unable to identify its type. Key = {}'.format(key))
         else:
-            raise ValueError('Error in RootWriter.CreateBuffer: Unable to identify buffer type.')
+            raise ValueError('Error in RootWriter.CreateBuffer: Unable to identify buffer type. Key = {}'.format(key))
         return
 
     def WriteToBuffer(self,key,val):
