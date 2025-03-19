@@ -409,7 +409,8 @@ class Processor():
                         suffix='Complete'
                     )
                     if(n_mcp_mu > 1):
-                        print('\tWarning: Found {} truth-level muons in event! Skipping...'.format(n_mcp_mu))
+                        print('\tWarning: Found {} truth-level muons in event!'.format(n_mcp_mu))
+                        # continue
 
                 ##################################################################
                 # Loop over the track objects and fill histograms for D0, Z0, and hit counts
@@ -506,22 +507,24 @@ class Processor():
                     self.writer.Append('mcp_mu_{}'.format(key),val)
 
                 for key,val in matched_track_dict.items():
-                    self.writer.Append('dr_matched_track_{}'.format(key),val)
+                    self.writer.Append('dr-matched_track_{}'.format(key),val)
 
                 for key,val in matched_muon_dict.items():
-                    self.writer.Append('dr_matched_muon_{}'.format(key),val)
+                    self.writer.Append('dr-matched_muon_{}'.format(key),val)
 
                 for key,val in resolution_dict.items():
-                    self.writer.Append('dr_matched_resolution_{}'.format(key),val)
+                    self.writer.Append('dr-matched_resolution_{}'.format(key),val)
 
                 for key,val in lc_matched_track_dict.items():
-                    self.writer.Append('lc_matched_track_{}'.format(key),val)
+                    self.writer.Append('lc-matched_track_{}'.format(key),val)
 
                 for key,val in lc_matched_mcp_dict.items():
-                    self.writer.Append('lc_matched_mcp_{}'.format(key),val)
+                    self.writer.Append('lc-matched_mcp_{}'.format(key),val)
 
                 for key,val in fake_track_dict.items():
                     self.writer.Append('fake_track_{}'.format(key),val)
+
+                # NOTE: Can add additional information here, maybe some event-level stuff.
 
                 if(self.mode != 'json'): # for ROOT writer, flush buffers to tree!
                     self.writer.FlushBuffersToTree()
